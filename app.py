@@ -34,7 +34,7 @@ def init_db():
                 target_reps INTEGER,
                 rest_seconds INTEGER,
                 coach_notes TEXT,
-                UNIQUE(routine_id, week, day),
+                UNIQUE(routine_id, week, day, exercise),
                 FOREIGN KEY(routine_id) REFERENCES routines(id) ON DELETE CASCADE
                 )""")
     c.execute("""CREATE TABLE IF NOT EXISTS session_entries (
@@ -82,10 +82,12 @@ def create_routine(name, weeks, days):
     rid = c.lastrowid
     for w in range(1, weeks+1):
         for d in range(1, days+1):
-            c.execute("""INSERT INTO routine_days(
-                        routine_id,week,day,exercise,target_weight,target_reps,rest_seconds,coach_notes
-                        ) VALUES(?,?,?,?,?,?,?,?)""",
-                      (rid, w, d, f"Workout {d}", 50.0, 8, 90, f"Coach note W{w}D{d}"))
+            exercises = ["Squat", "Bench Press", "Deadlift"]
+            for ex in exercises:
+                c.execute("""INSERT INTO routine_days(
+                            routine_id,week,day,exercise,target_weight,target_reps,rest_seconds,coach_notes
+                            ) VALUES(?,?,?,?,?,?,?,?)""",
+                          (rid, w, d, ex, 50.0, 8, 90, f"Coach note for {ex} W{w}D{d}"))
     conn.commit(); conn.close()
     return rid
 
@@ -126,12 +128,13 @@ def copy_last_session(routine_day_id):
 
 def get_progress(routine_id):
     days = get_days_for_routine(routine_id)
-    total = len(days)
+    total_days = len(set((d['week'], d['day']) for d in days))
     conn = get_conn(); c = conn.cursor()
-    completed = c.execute("""SELECT COUNT(DISTINCT routine_day_id) FROM session_entries
-                             WHERE routine_day_id IN (SELECT id FROM routine_days WHERE routine_id=?)""", (routine_id,)).fetchone()[0]
+    completed_days = c.execute("""SELECT COUNT(DISTINCT rd.week || '-' || rd.day) FROM routine_days rd
+                                   JOIN session_entries se ON rd.id = se.routine_day_id
+                                   WHERE rd.routine_id=?""", (routine_id,)).fetchone()[0]
     conn.close()
-    return completed, total
+    return completed_days, total_days
 
 def get_pr_history(exercise):
     conn = get_conn(); c = conn.cursor()
@@ -217,34 +220,43 @@ st.progress(min(1.0, completed/total if total > 0 else 0.0))
 st.caption(f"Progresso: {completed}/{total} giorni completati")
 
 st.subheader("Scheda PT con log")
+grouped_days = {}
 for day in days:
-    with st.expander(f"Settimana {day['week']} - Giorno {day['day']} ({day['exercise']})"):
-        col1, col2 = st.columns([2,1])
-        with col1:
-            st.markdown(f"- Target peso: **{day['target_weight']}** kg")
-            st.markdown(f"- Target reps: **{day['target_reps']}**")
-            st.markdown(f"- Rest: **{day['rest_seconds']}** sec")
-            st.markdown(f"- Note coach: *{day['coach_notes']}*")
-        with col2:
-            tw = st.number_input(f"Pesi target (W{day['week']}D{day['day']})", value=day["target_weight"], key=f"tw{day['id']}")
-            tr = st.number_input(f"Reps target", value=day["target_reps"], key=f"tr{day['id']}")
-            rs = st.number_input(f"Rest sec", value=day["rest_seconds"], key=f"rs{day['id']}")
-            cn = st.text_area("Note coach", value=day["coach_notes"], key=f"cn{day['id']}", height=70)
-            if st.button("Aggiorna PT", key=f"upd{day['id']}"):
-                save_day(day["id"], tw, tr, rs, cn)
-                st.success("Scheda aggiornata")
-        st.write("---")
-        ae = st.number_input("Peso effettivo", key=f"aw{day['id']}", min_value=0.0, step=0.5, format="%.2f")
-        ar = st.number_input("Reps effettive", key=f"ar{day['id']}", min_value=0, step=1)
-        un = st.text_area("Note personali", key=f"un{day['id']}", height=80)
-        if st.button("Salva log", key=f"log{day['id']}"):
-            save_entry(day["id"], ae, ar, un)
-            st.success("Log salvato")
-        if st.button("Copia ultimo identico", key=f"cpy{day['id']}"):
-            if copy_last_session(day["id"]):
-                st.success("Copia effettuata")
-            else:
-                st.warning("Nessun dato precedente disponibile")
+    key = (day['week'], day['day'])
+    if key not in grouped_days:
+        grouped_days[key] = []
+    grouped_days[key].append(day)
+
+for (week, day_num), exercises in grouped_days.items():
+    with st.expander(f"Settimana {week} - Giorno {day_num}"):
+        for ex in exercises:
+            st.markdown(f"**{ex['exercise']}**")
+            col1, col2 = st.columns([2,1])
+            with col1:
+                st.markdown(f"- Target peso: **{ex['target_weight']}** kg")
+                st.markdown(f"- Target reps: **{ex['target_reps']}**")
+                st.markdown(f"- Rest: **{ex['rest_seconds']}** sec")
+                st.markdown(f"- Note coach: *{ex['coach_notes']}*")
+            with col2:
+                tw = st.number_input(f"Pesi target ({ex['exercise']})", value=ex["target_weight"], key=f"tw{ex['id']}")
+                tr = st.number_input(f"Reps target", value=ex["target_reps"], key=f"tr{ex['id']}")
+                rs = st.number_input(f"Rest sec", value=ex["rest_seconds"], key=f"rs{ex['id']}")
+                cn = st.text_area("Note coach", value=ex["coach_notes"], key=f"cn{ex['id']}", height=70)
+                if st.button("Aggiorna PT", key=f"upd{ex['id']}"):
+                    save_day(ex["id"], tw, tr, rs, cn)
+                    st.success("Scheda aggiornata")
+            st.write("---")
+            ae = st.number_input("Peso effettivo", key=f"aw{ex['id']}", min_value=0.0, step=0.5, format="%.2f")
+            ar = st.number_input("Reps effettive", key=f"ar{ex['id']}", min_value=0, step=1)
+            un = st.text_area("Note personali", key=f"un{ex['id']}", height=80)
+            if st.button("Salva log", key=f"log{ex['id']}"):
+                save_entry(ex["id"], ae, ar, un)
+                st.success("Log salvato")
+            if st.button("Copia ultimo identico", key=f"cpy{ex['id']}"):
+                if copy_last_session(ex["id"]):
+                    st.success("Copia effettuata")
+                else:
+                    st.warning("Nessun dato precedente disponibile")
 
 st.subheader("Cronologia Carico (PR)")
 exercise_options = sorted({d["exercise"] for d in days})
