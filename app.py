@@ -15,7 +15,7 @@ def init_db():
     # Check version
     c.execute("CREATE TABLE IF NOT EXISTS db_version (version INTEGER)")
     version = c.execute("SELECT version FROM db_version").fetchone()
-    if version is None or version[0] < 2:
+    if version is None or version[0] < 3:
         # Drop old tables and recreate
         c.execute("DROP TABLE IF EXISTS session_entries")
         c.execute("DROP TABLE IF EXISTS routine_days")
@@ -24,7 +24,7 @@ def init_db():
         c.execute("DROP TABLE IF EXISTS db_version")
         # Recreate
         c.execute("CREATE TABLE db_version (version INTEGER)")
-        c.execute("INSERT INTO db_version VALUES (2)")
+        c.execute("INSERT INTO db_version VALUES (3)")
         c.execute("""CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY,
                     username TEXT UNIQUE,
@@ -44,6 +44,7 @@ def init_db():
                     day INTEGER,
                     exercise TEXT,
                     target_weight REAL,
+                    target_sets INTEGER,
                     target_reps INTEGER,
                     rest_seconds INTEGER,
                     coach_notes TEXT,
@@ -53,6 +54,7 @@ def init_db():
         c.execute("""CREATE TABLE IF NOT EXISTS session_entries (
                     id INTEGER PRIMARY KEY,
                     routine_day_id INTEGER,
+                    set_number INTEGER,
                     entry_date TEXT,
                     actual_weight REAL,
                     actual_reps INTEGER,
@@ -97,9 +99,9 @@ def create_routine(name, weeks, days):
             exercises = ["Squat", "Bench Press", "Deadlift"]
             for ex in exercises:
                 c.execute("""INSERT INTO routine_days(
-                            routine_id,week,day,exercise,target_weight,target_reps,rest_seconds,coach_notes
-                            ) VALUES(?,?,?,?,?,?,?,?)""",
-                          (rid, w, d, ex, 50.0, 8, 90, f"Coach note for {ex} W{w}D{d}"))
+                            routine_id,week,day,exercise,target_weight,target_sets,target_reps,rest_seconds,coach_notes
+                            ) VALUES(?,?,?,?,?,?,?,?,?)""",
+                          (rid, w, d, ex, 50.0, 3, 8, 90, f"Coach note for {ex} W{w}D{d}"))
     conn.commit(); conn.close()
     return rid
 
@@ -113,28 +115,33 @@ def get_days_for_routine(routine_id):
     rows = c.execute("SELECT * FROM routine_days WHERE routine_id=? ORDER BY week, day", (routine_id,)).fetchall()
     conn.close(); return rows
 
-def save_day(routine_day_id, target_weight, target_reps, rest_seconds, coach_notes):
+def save_day(routine_day_id, target_weight, target_sets, target_reps, rest_seconds, coach_notes):
     conn = get_conn(); c = conn.cursor()
-    c.execute("""UPDATE routine_days SET target_weight=?, target_reps=?, rest_seconds=?, coach_notes=? 
-                 WHERE id=?""", (target_weight, target_reps, rest_seconds, coach_notes, routine_day_id))
+    c.execute("""UPDATE routine_days SET target_weight=?, target_sets=?, target_reps=?, rest_seconds=?, coach_notes=? 
+                 WHERE id=?""", (target_weight, target_sets, target_reps, rest_seconds, coach_notes, routine_day_id))
     conn.commit(); conn.close()
 
-def save_entry(routine_day_id, actual_weight, actual_reps, user_notes):
+def save_entry(routine_day_id, set_number, actual_weight, actual_reps, user_notes):
     conn = get_conn(); c = conn.cursor()
     today = datetime.utcnow().strftime("%Y-%m-%d")
-    c.execute("""INSERT INTO session_entries(routine_day_id,entry_date,actual_weight,actual_reps,user_notes)
-                 VALUES(?,?,?,?,?)""", (routine_day_id, today, actual_weight, actual_reps, user_notes))
+    c.execute("""INSERT INTO session_entries(routine_day_id,set_number,entry_date,actual_weight,actual_reps,user_notes)
+                 VALUES(?,?,?,?,?,?)""", (routine_day_id, set_number, today, actual_weight, actual_reps, user_notes))
     conn.commit(); conn.close()
 
-def get_last_entry(routine_day_id):
+def get_last_entries(routine_day_id):
     conn = get_conn(); c = conn.cursor()
-    row = c.execute("""SELECT * FROM session_entries WHERE routine_day_id=? ORDER BY id DESC LIMIT 1""", (routine_day_id,)).fetchone()
-    conn.close(); return row
+    rows = c.execute("""SELECT * FROM session_entries WHERE routine_day_id=? ORDER BY entry_date DESC, set_number""", (routine_day_id,)).fetchall()
+    # Group by date, take latest date
+    if rows:
+        latest_date = rows[0]['entry_date']
+        return [r for r in rows if r['entry_date'] == latest_date]
+    return []
 
 def copy_last_session(routine_day_id):
-    last = get_last_entry(routine_day_id)
-    if last:
-        save_entry(routine_day_id, last["actual_weight"], last["actual_reps"], last["user_notes"])
+    lasts = get_last_entries(routine_day_id)
+    if lasts:
+        for last in lasts:
+            save_entry(routine_day_id, last["set_number"], last["actual_weight"], last["actual_reps"], last["user_notes"])
         return True
     return False
 
@@ -246,24 +253,96 @@ for (week, day_num), exercises in grouped_days.items():
             col1, col2 = st.columns([2,1])
             with col1:
                 st.markdown(f"- Target peso: **{ex['target_weight']}** kg")
+                st.markdown(f"- Target sets: **{ex['target_sets']}**")
                 st.markdown(f"- Target reps: **{ex['target_reps']}**")
                 st.markdown(f"- Rest: **{ex['rest_seconds']}** sec")
                 st.markdown(f"- Note coach: *{ex['coach_notes']}*")
             with col2:
+                ex_name = st.text_input(f"Nome esercizio", value=ex["exercise"], key=f"en{ex['id']}")
                 tw = st.number_input(f"Pesi target ({ex['exercise']})", value=ex["target_weight"], key=f"tw{ex['id']}")
+                ts = st.number_input(f"Sets target", value=ex["target_sets"], key=f"ts{ex['id']}")
                 tr = st.number_input(f"Reps target", value=ex["target_reps"], key=f"tr{ex['id']}")
                 rs = st.number_input(f"Rest sec", value=ex["rest_seconds"], key=f"rs{ex['id']}")
                 cn = st.text_area("Note coach", value=ex["coach_notes"], key=f"cn{ex['id']}", height=70)
                 if st.button("Aggiorna PT", key=f"upd{ex['id']}"):
-                    save_day(ex["id"], tw, tr, rs, cn)
+                    # Update exercise name too
+                    conn = get_conn(); c = conn.cursor()
+                    c.execute("""UPDATE routine_days SET exercise=?, target_weight=?, target_sets=?, target_reps=?, rest_seconds=?, coach_notes=? 
+                                 WHERE id=?""", (ex_name, tw, ts, tr, rs, cn, ex["id"]))
+                    conn.commit(); conn.close()
                     st.success("Scheda aggiornata")
+                    safe_rerun()
             st.write("---")
-            ae = st.number_input("Peso effettivo", key=f"aw{ex['id']}", min_value=0.0, step=0.5, format="%.2f")
-            ar = st.number_input("Reps effettive", key=f"ar{ex['id']}", min_value=0, step=1)
-            un = st.text_area("Note personali", key=f"un{ex['id']}", height=80)
-            if st.button("Salva log", key=f"log{ex['id']}"):
-                save_entry(ex["id"], ae, ar, un)
-                st.success("Log salvato")
+            for set_num in range(1, ex['target_sets'] + 1):
+                st.markdown(f"**Set {set_num}**")
+                col3, col4 = st.columns(2)
+                with col3:
+                    ae = st.number_input(f"Peso effettivo Set {set_num}", key=f"aw{ex['id']}_{set_num}", min_value=0.0, step=0.5, format="%.2f")
+                    ar = st.number_input(f"Reps effettive Set {set_num}", key=f"ar{ex['id']}_{set_num}", min_value=0, step=1)
+                with col4:
+                    un = st.text_area(f"Note personali Set {set_num}", key=f"un{ex['id']}_{set_num}", height=60)
+                if st.button(f"Salva Set {set_num}", key=f"log{ex['id']}_{set_num}"):
+                    save_entry(ex["id"], set_num, ae, ar, un)
+                    st.success(f"Set {set_num} salvato")
+            if st.button("Copia ultimo identico", key=f"cpy{ex['id']}"):
+                if copy_last_session(ex["id"]):
+                    st.success("Copia effettuata")
+                else:
+                    st.warning("Nessun dato precedente disponibile")
+        # Add new exercise
+        st.write("---")
+        st.subheader("Aggiungi nuovo esercizio")
+        new_ex_name = st.text_input(f"Nome esercizio (W{week}D{day_num})", key=f"new_ex_{week}_{day_num}")
+        new_tw = st.number_input(f"Peso target", key=f"new_tw_{week}_{day_num}", min_value=0.0, step=0.5, format="%.2f")
+        new_ts = st.number_input(f"Sets target", key=f"new_ts_{week}_{day_num}", min_value=1, value=3)
+        new_tr = st.number_input(f"Reps target", key=f"new_tr_{week}_{day_num}", min_value=1, value=8)
+        new_rs = st.number_input(f"Rest sec", key=f"new_rs_{week}_{day_num}", min_value=0, value=90)
+        new_cn = st.text_area(f"Note coach", key=f"new_cn_{week}_{day_num}", height=70)
+        if st.button(f"Aggiungi esercizio a Giorno {day_num}", key=f"add_ex_{week}_{day_num}"):
+            if new_ex_name:
+                conn = get_conn(); c = conn.cursor()
+                c.execute("""INSERT INTO routine_days(routine_id,week,day,exercise,target_weight,target_sets,target_reps,rest_seconds,coach_notes)
+                             VALUES(?,?,?,?,?,?,?,?,?)""", (rid, week, day_num, new_ex_name, new_tw, new_ts, new_tr, new_rs, new_cn))
+                conn.commit(); conn.close()
+                st.success(f"Esercizio {new_ex_name} aggiunto")
+                safe_rerun()
+            else:
+                st.error("Inserisci nome esercizio")
+            st.markdown(f"**{ex['exercise']}**")
+            col1, col2 = st.columns([2,1])
+            with col1:
+                st.markdown(f"- Target peso: **{ex['target_weight']}** kg")
+                st.markdown(f"- Target sets: **{ex['target_sets']}**")
+                st.markdown(f"- Target reps: **{ex['target_reps']}**")
+                st.markdown(f"- Rest: **{ex['rest_seconds']}** sec")
+                st.markdown(f"- Note coach: *{ex['coach_notes']}*")
+            with col2:
+                ex_name = st.text_input(f"Nome esercizio", value=ex["exercise"], key=f"en{ex['id']}")
+                tw = st.number_input(f"Pesi target ({ex['exercise']})", value=ex["target_weight"], key=f"tw{ex['id']}")
+                ts = st.number_input(f"Sets target", value=ex["target_sets"], key=f"ts{ex['id']}")
+                tr = st.number_input(f"Reps target", value=ex["target_reps"], key=f"tr{ex['id']}")
+                rs = st.number_input(f"Rest sec", value=ex["rest_seconds"], key=f"rs{ex['id']}")
+                cn = st.text_area("Note coach", value=ex["coach_notes"], key=f"cn{ex['id']}", height=70)
+                if st.button("Aggiorna PT", key=f"upd{ex['id']}"):
+                    # Update exercise name too
+                    conn = get_conn(); c = conn.cursor()
+                    c.execute("""UPDATE routine_days SET exercise=?, target_weight=?, target_sets=?, target_reps=?, rest_seconds=?, coach_notes=? 
+                                 WHERE id=?""", (ex_name, tw, ts, tr, rs, cn, ex["id"]))
+                    conn.commit(); conn.close()
+                    st.success("Scheda aggiornata")
+                    safe_rerun()
+            st.write("---")
+            for set_num in range(1, ex['target_sets'] + 1):
+                st.markdown(f"**Set {set_num}**")
+                col3, col4 = st.columns(2)
+                with col3:
+                    ae = st.number_input(f"Peso effettivo Set {set_num}", key=f"aw{ex['id']}_{set_num}", min_value=0.0, step=0.5, format="%.2f")
+                    ar = st.number_input(f"Reps effettive Set {set_num}", key=f"ar{ex['id']}_{set_num}", min_value=0, step=1)
+                with col4:
+                    un = st.text_area(f"Note personali Set {set_num}", key=f"un{ex['id']}_{set_num}", height=60)
+                if st.button(f"Salva Set {set_num}", key=f"log{ex['id']}_{set_num}"):
+                    save_entry(ex["id"], set_num, ae, ar, un)
+                    st.success(f"Set {set_num} salvato")
             if st.button("Copia ultimo identico", key=f"cpy{ex['id']}"):
                 if copy_last_session(ex["id"]):
                     st.success("Copia effettuata")
