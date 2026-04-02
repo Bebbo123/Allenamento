@@ -146,6 +146,14 @@ def get_pr_history(exercise):
     df["entry_date"] = pd.to_datetime(df["entry_date"])
     return df.groupby("entry_date")["actual_weight"].max().reset_index()
 
+
+def safe_rerun():
+    try:
+        st.experimental_rerun()
+    except Exception:
+        # in some Streamlit versions / Cloud contexts this may be non-disponible
+        pass
+
 #### App UI
 st.set_page_config(page_title="Gym Tracker", layout="wide", initial_sidebar_state="expanded")
 
@@ -164,7 +172,7 @@ if not st.session_state.logged_in:
         if st.button("Entra"):
             if check_login(username, password):
                 st.session_state.logged_in = True; st.session_state.user = username
-                st.experimental_rerun()
+                safe_rerun()
             else:
                 st.error("Credenziali errate")
     with reg_col:
@@ -174,12 +182,14 @@ if not st.session_state.logged_in:
         if st.button("Registra"):
             ok = register_user(ru, rp)
             st.success("Utente registrato" if ok else "Username già esistente")
-    st.stop()
+    if not st.session_state.logged_in:
+        st.stop()
 
 st.sidebar.markdown(f"**Utente:** {st.session_state.user}")
 if st.sidebar.button("Logout"):
     st.session_state.logged_in = False; st.session_state.user = None
-    st.experimental_rerun()
+    safe_rerun()
+    st.stop()
 
 st.title("Gym Tracker Professionale")
 st.markdown("App mobile-first ottimizzata iPhone")
@@ -191,7 +201,7 @@ with st.expander("Crea nuova scheda"):
     if st.button("Crea scheda"):
         rid = create_routine(rn, weeks, days)
         st.success(f"Scheda {rn} creata con id {rid}")
-        st.experimental_rerun()
+        safe_rerun()
 
 routines = get_routines()
 if not routines:
