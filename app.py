@@ -220,10 +220,42 @@ with st.expander("Crea nuova scheda"):
     rn = st.text_input("Nome scheda", value="Scheda A")
     weeks = st.number_input("Settimane totali", min_value=1, max_value=24, value=4)
     days = st.number_input("Giorni/settimana", min_value=1, max_value=7, value=3)
-    if st.button("Crea scheda"):
-        rid = create_routine(rn, weeks, days)
-        st.success(f"Scheda {rn} creata con id {rid}")
+    
+    # Dynamic exercises
+    if "temp_exercises" not in st.session_state:
+        st.session_state.temp_exercises = []
+    
+    st.subheader("Esercizi per ogni giorno")
+    for i, ex in enumerate(st.session_state.temp_exercises):
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        with col1:
+            ex['name'] = st.text_input(f"Nome esercizio {i+1}", value=ex.get('name', ''), key=f"ex_name_{i}")
+        with col2:
+            ex['weight'] = st.number_input(f"Peso target {i+1}", value=ex.get('weight', 50.0), min_value=0.0, step=0.5, format="%.2f", key=f"ex_weight_{i}")
+        with col3:
+            ex['sets'] = st.number_input(f"Sets {i+1}", value=ex.get('sets', 3), min_value=1, key=f"ex_sets_{i}")
+        with col4:
+            ex['reps'] = st.number_input(f"Reps {i+1}", value=ex.get('reps', 8), min_value=1, key=f"ex_reps_{i}")
+        with col5:
+            ex['rest'] = st.number_input(f"Rest sec {i+1}", value=ex.get('rest', 90), min_value=0, key=f"ex_rest_{i}")
+        with col6:
+            if st.button(f"Rimuovi {i+1}", key=f"remove_ex_{i}"):
+                st.session_state.temp_exercises.pop(i)
+                safe_rerun()
+    
+    if st.button("Aggiungi esercizio"):
+        st.session_state.temp_exercises.append({'name': '', 'weight': 50.0, 'sets': 3, 'reps': 8, 'rest': 90, 'notes': ''})
         safe_rerun()
+    
+    if st.session_state.temp_exercises:
+        if st.button("Crea scheda"):
+            if all(ex['name'] for ex in st.session_state.temp_exercises):
+                rid = create_routine_custom(rn, weeks, days, st.session_state.temp_exercises)
+                st.success(f"Scheda {rn} creata con id {rid}")
+                st.session_state.temp_exercises = []  # Reset
+                safe_rerun()
+            else:
+                st.error("Tutti gli esercizi devono avere un nome")
 
 routines = get_routines()
 if not routines:
