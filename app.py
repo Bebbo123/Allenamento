@@ -12,45 +12,57 @@ def get_conn():
 def init_db():
     conn = get_conn()
     c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY,
-                username TEXT UNIQUE,
-                password_hash TEXT
-                )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS routines (
-                id INTEGER PRIMARY KEY,
-                name TEXT,
-                weeks INTEGER,
-                days_per_week INTEGER,
-                created_at TEXT
-                )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS routine_days (
-                id INTEGER PRIMARY KEY,
-                routine_id INTEGER,
-                week INTEGER,
-                day INTEGER,
-                exercise TEXT,
-                target_weight REAL,
-                target_reps INTEGER,
-                rest_seconds INTEGER,
-                coach_notes TEXT,
-                UNIQUE(routine_id, week, day, exercise),
-                FOREIGN KEY(routine_id) REFERENCES routines(id) ON DELETE CASCADE
-                )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS session_entries (
-                id INTEGER PRIMARY KEY,
-                routine_day_id INTEGER,
-                entry_date TEXT,
-                actual_weight REAL,
-                actual_reps INTEGER,
-                user_notes TEXT,
-                FOREIGN KEY(routine_day_id) REFERENCES routine_days(id) ON DELETE CASCADE
-                )""")
-    conn.commit()
-    if not c.execute("SELECT 1 FROM users LIMIT 1").fetchone():
+    # Check version
+    c.execute("CREATE TABLE IF NOT EXISTS db_version (version INTEGER)")
+    version = c.execute("SELECT version FROM db_version").fetchone()
+    if version is None or version[0] < 2:
+        # Drop old tables and recreate
+        c.execute("DROP TABLE IF EXISTS session_entries")
+        c.execute("DROP TABLE IF EXISTS routine_days")
+        c.execute("DROP TABLE IF EXISTS routines")
+        c.execute("DROP TABLE IF EXISTS users")
+        c.execute("DROP TABLE IF EXISTS db_version")
+        # Recreate
+        c.execute("CREATE TABLE db_version (version INTEGER)")
+        c.execute("INSERT INTO db_version VALUES (2)")
+        c.execute("""CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY,
+                    username TEXT UNIQUE,
+                    password_hash TEXT
+                    )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS routines (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT,
+                    weeks INTEGER,
+                    days_per_week INTEGER,
+                    created_at TEXT
+                    )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS routine_days (
+                    id INTEGER PRIMARY KEY,
+                    routine_id INTEGER,
+                    week INTEGER,
+                    day INTEGER,
+                    exercise TEXT,
+                    target_weight REAL,
+                    target_reps INTEGER,
+                    rest_seconds INTEGER,
+                    coach_notes TEXT,
+                    UNIQUE(routine_id, week, day, exercise),
+                    FOREIGN KEY(routine_id) REFERENCES routines(id) ON DELETE CASCADE
+                    )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS session_entries (
+                    id INTEGER PRIMARY KEY,
+                    routine_day_id INTEGER,
+                    entry_date TEXT,
+                    actual_weight REAL,
+                    actual_reps INTEGER,
+                    user_notes TEXT,
+                    FOREIGN KEY(routine_day_id) REFERENCES routine_days(id) ON DELETE CASCADE
+                    )""")
+        # Default user
         hard = hashlib.sha256("admin:admin".encode()).hexdigest()
         c.execute("INSERT OR IGNORE INTO users(username,password_hash) VALUES(?,?)", ("admin", hard))
-        conn.commit()
+    conn.commit()
     conn.close()
 
 def hash_pw(username, password):
