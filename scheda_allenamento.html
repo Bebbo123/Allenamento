@@ -1,0 +1,1198 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Scheda Allenamento</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg: #0d0d0f;
+    --surface: #16161a;
+    --surface2: #1e1e24;
+    --surface3: #26262e;
+    --accent: #e8ff47;
+    --accent2: #ff6b35;
+    --text: #f0f0f0;
+    --text2: #9a9aaa;
+    --border: #2e2e3a;
+    --pt-color: #7eb8ff;
+    --done-color: #52e89e;
+    --radius: 12px;
+    --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── HEADER ── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 60px;
+  }
+  .logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 26px;
+    letter-spacing: 2px;
+    color: var(--accent);
+  }
+  .logo span { color: var(--text2); font-size: 13px; font-family: 'DM Sans', sans-serif; display: block; letter-spacing: 0; line-height: 1; margin-top: -4px; }
+  .header-actions { display: flex; gap: 8px; }
+  .btn {
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all .2s;
+    white-space: nowrap;
+  }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-primary:hover { background: #d4e83e; transform: translateY(-1px); }
+  .btn-secondary { background: var(--surface3); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { background: var(--surface2); }
+  .btn-danger { background: #ff3b3b22; color: #ff6b6b; border: 1px solid #ff3b3b44; }
+  .btn-danger:hover { background: #ff3b3b33; }
+  .btn-export { background: #52e89e22; color: var(--done-color); border: 1px solid #52e89e44; }
+  .btn-export:hover { background: #52e89e33; }
+  .btn-import { background: #7eb8ff22; color: var(--pt-color); border: 1px solid #7eb8ff44; }
+  .btn-import:hover { background: #7eb8ff33; }
+  .btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+  /* ── TABS ── */
+  .tabs {
+    display: flex;
+    gap: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 16px;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    padding: 12px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text2);
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: all .2s;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-badge {
+    background: var(--surface3);
+    color: var(--text2);
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 20px;
+  }
+  .tab.active .tab-badge { background: #e8ff4722; color: var(--accent); }
+
+  /* ── MAIN ── */
+  main { padding: 16px; max-width: 900px; margin: 0 auto; }
+
+  /* ── VIEW SELECTOR ── */
+  .view-selector {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .view-selector label { font-size: 12px; color: var(--text2); font-weight: 500; }
+  .select-group { display: flex; gap: 8px; flex-wrap: wrap; }
+  select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239a9aaa' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 28px;
+  }
+  select:focus { border-color: var(--accent); }
+
+  /* ── SECTION HEADER ── */
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .section-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    letter-spacing: 1px;
+    color: var(--text);
+  }
+  .section-title span { color: var(--accent); }
+
+  /* ── EXERCISE CARD ── */
+  .exercise-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    overflow: hidden;
+    transition: border-color .2s;
+  }
+  .exercise-card:hover { border-color: var(--surface3); }
+  .exercise-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    background: var(--surface2);
+    cursor: pointer;
+    gap: 12px;
+  }
+  .exercise-name {
+    font-weight: 600;
+    font-size: 15px;
+    flex: 1;
+  }
+  .exercise-meta {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: var(--surface3);
+    color: var(--text2);
+  }
+  .badge.pt { background: #7eb8ff22; color: var(--pt-color); }
+  .badge.done { background: #52e89e22; color: var(--done-color); }
+  .chevron {
+    color: var(--text2);
+    transition: transform .2s;
+    flex-shrink: 0;
+  }
+  .chevron.open { transform: rotate(180deg); }
+
+  .exercise-body { padding: 16px; display: none; }
+  .exercise-body.open { display: block; }
+
+  /* ── SERIE TABLE ── */
+  .serie-section { margin-bottom: 16px; }
+  .serie-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .serie-section-title.pt-title { color: var(--pt-color); }
+  .serie-section-title.done-title { color: var(--done-color); }
+  .serie-section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .serie-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .serie-table th {
+    text-align: center;
+    padding: 6px 4px;
+    color: var(--text2);
+    font-size: 11px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+  }
+  .serie-table th:first-child { text-align: left; padding-left: 8px; }
+  .serie-table td {
+    padding: 6px 4px;
+    text-align: center;
+    vertical-align: top;
+  }
+  .serie-table td:first-child { text-align: left; padding-left: 8px; }
+  .serie-table tr:not(:last-child) td { border-bottom: 1px solid var(--border)22; }
+
+  .serie-input {
+    width: 100%;
+    min-width: 52px;
+    background: var(--surface3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 6px;
+    border-radius: 6px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    text-align: center;
+    outline: none;
+    transition: border-color .2s;
+  }
+  .serie-input:focus { border-color: var(--accent); }
+  .serie-input.pt-input:focus { border-color: var(--pt-color); }
+  .serie-input.notes-input { text-align: left; min-width: 80px; }
+
+  .serie-num {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 16px;
+    color: var(--text2);
+    min-width: 24px;
+    display: inline-block;
+  }
+
+  /* ── ADD FORMS ── */
+  .add-form {
+    background: var(--surface2);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+    display: none;
+  }
+  .add-form.open { display: block; }
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  .form-group label { font-size: 11px; color: var(--text2); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+  .form-input {
+    background: var(--surface3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 9px 10px;
+    border-radius: 8px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    outline: none;
+    width: 100%;
+    transition: border-color .2s;
+  }
+  .form-input:focus { border-color: var(--accent); }
+  .form-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* ── STATS BAR ── */
+  .stats-bar {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .stat-chip {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stat-chip .val {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .stat-chip .lbl { font-size: 10px; color: var(--text2); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+
+  /* ── PROGRESS OVERVIEW ── */
+  .progress-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .progress-table th, .progress-table td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .progress-table th { color: var(--text2); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+  .progress-table tr:hover td { background: var(--surface2); }
+  .progress-bar-wrap { background: var(--surface3); border-radius: 4px; height: 6px; width: 100px; overflow: hidden; display: inline-block; vertical-align: middle; margin-left: 8px; }
+  .progress-bar-fill { height: 100%; background: var(--done-color); border-radius: 4px; transition: width .3s; }
+
+  /* ── MODAL ── */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.7);
+    z-index: 200;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    width: 100%;
+    max-width: 500px;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 24px;
+    box-shadow: var(--shadow);
+  }
+  .modal h2 { font-family: 'Bebas Neue', sans-serif; font-size: 24px; margin-bottom: 16px; color: var(--accent); }
+  .modal-actions { display: flex; gap: 8px; margin-top: 20px; justify-content: flex-end; }
+
+  /* ── TOAST ── */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--surface3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    z-index: 999;
+    transition: transform .3s;
+    white-space: nowrap;
+    box-shadow: var(--shadow);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.success { border-color: #52e89e44; color: var(--done-color); }
+  .toast.error { border-color: #ff6b6b44; color: #ff6b6b; }
+
+  /* ── EMPTY STATE ── */
+  .empty {
+    text-align: center;
+    padding: 48px 16px;
+    color: var(--text2);
+  }
+  .empty-icon { font-size: 48px; margin-bottom: 12px; }
+  .empty h3 { font-family: 'Bebas Neue', sans-serif; font-size: 22px; color: var(--text); margin-bottom: 6px; }
+  .empty p { font-size: 13px; }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 600px) {
+    .hide-mobile { display: none !important; }
+    .logo span { display: none; }
+    header { height: 52px; }
+    .section-title { font-size: 18px; }
+    .serie-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .form-grid { grid-template-columns: 1fr 1fr; }
+  }
+
+  /* ── WEEK SELECTOR PILLS ── */
+  .week-pills {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .week-pill {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .week-pill.active { background: var(--accent); color: #000; border-color: var(--accent); }
+  .week-pill.has-data { border-color: var(--done-color)44; color: var(--done-color); }
+  .week-pill.active.has-data { background: var(--accent); color: #000; }
+
+  /* ── SESSION PILLS ── */
+  .day-pills {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    align-items: center;
+  }
+  .day-pill {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 54px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 700;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text2);
+    cursor: pointer;
+    transition: all .2s;
+    gap: 2px;
+    line-height: 1.2;
+  }
+  .day-pill .pill-num {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 17px;
+    line-height: 1;
+  }
+  .day-pill .pill-dow {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+    white-space: nowrap;
+    max-width: 52px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .day-pill.active { background: var(--accent); color: #000; border-color: var(--accent); }
+  .day-pill.has-data { border-color: var(--done-color)44; color: var(--done-color); }
+  .day-pill.active.has-data { background: var(--accent); color: #000; }
+
+  /* ── DAY-OF-WEEK PICKER ── */
+  .dow-picker {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .dow-picker label { font-size: 12px; color: var(--text2); font-weight: 600; white-space: nowrap; }
+  .dow-picker select {
+    flex: 1;
+    min-width: 140px;
+    max-width: 220px;
+    font-size: 13px;
+    padding: 7px 28px 7px 10px;
+  }
+  .dow-hint { font-size: 11px; color: var(--text2); }
+
+  /* delete btn inline */
+  .del-btn {
+    background: none;
+    border: none;
+    color: var(--text2);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    transition: color .2s;
+    flex-shrink: 0;
+  }
+  .del-btn:hover { color: #ff6b6b; }
+  .del-btn svg { width: 14px; height: 14px; }
+
+  /* Role switch */
+  .role-switch {
+    display: flex;
+    gap: 4px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 3px;
+  }
+  .role-btn {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    transition: all .2s;
+    font-family: 'DM Sans', sans-serif;
+    background: none;
+    color: var(--text2);
+  }
+  .role-btn.active { background: var(--accent); color: #000; }
+
+  .hint { font-size: 11px; color: var(--text2); margin-top: 4px; }
+
+  .divider { height: 1px; background: var(--border); margin: 16px 0; }
+</style>
+</head>
+<body>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">TRAINER<span>Gestione Schede</span></div>
+  <div class="header-actions">
+    <div class="role-switch">
+      <button class="role-btn active" id="roleAthleteBtn" onclick="setRole('athlete')">Atleta</button>
+      <button class="role-btn" id="rolePTBtn" onclick="setRole('pt')">PT</button>
+    </div>
+    <button class="btn btn-secondary hide-mobile" onclick="saveData()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      Salva
+    </button>
+    <button class="btn btn-export" onclick="exportExcel()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      Excel
+    </button>
+    <button class="btn btn-import" onclick="document.getElementById('importFile').click()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Carica
+    </button>
+    <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
+  </div>
+</header>
+
+<!-- TABS -->
+<div class="tabs" id="mainTabs">
+  <div class="tab active" onclick="showView('scheda')">📋 Scheda</div>
+  <div class="tab" onclick="showView('progressi')">📈 Progressi</div>
+  <div class="tab" onclick="showView('panoramica')">🗓️ Panoramica</div>
+</div>
+
+<!-- MAIN -->
+<main id="mainContent"></main>
+
+<!-- ADD EXERCISE MODAL -->
+<div class="modal-overlay" id="addExModal">
+  <div class="modal">
+    <h2>Aggiungi Esercizio</h2>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Nome Esercizio</label>
+      <input class="form-input" id="newExName" placeholder="es. Squat, Panca Piana…">
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Numero di Serie</label>
+      <input class="form-input" id="newExSerie" type="number" min="1" max="10" value="3">
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Applica a tutte le settimane</label>
+      <select class="form-input" id="newExAllWeeks">
+        <option value="1">Sì – ripeti per tutte le settimane (personalizzabile)</option>
+        <option value="0">No – solo settimana corrente</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('addExModal')">Annulla</button>
+      <button class="btn btn-primary" onclick="addExercise()">Aggiungi</button>
+    </div>
+  </div>
+</div>
+
+<!-- CONFIRM DELETE MODAL -->
+<div class="modal-overlay" id="confirmModal">
+  <div class="modal">
+    <h2>Conferma Eliminazione</h2>
+    <p style="color:var(--text2);margin-bottom:8px" id="confirmMsg"></p>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('confirmModal')">Annulla</button>
+      <button class="btn btn-danger" id="confirmOkBtn">Elimina</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// DATA MODEL
+// ─────────────────────────────────────────────
+// sessionDow: { [week]: { [sessionNum]: 'Martedì' } }
+let data = { exercises: [], sessionDow: {} };
+let currentWeek = 1;
+let currentDay = 1;
+let currentRole = 'athlete';
+let currentView = 'scheda';
+let expandedEx = {};
+
+const DOW_OPTIONS = ['–','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato','Domenica'];
+
+function getSessionDow(w, d) {
+  return (data.sessionDow && data.sessionDow[w] && data.sessionDow[w][d]) || '';
+}
+function setSessionDow(w, d, val) {
+  if (!data.sessionDow) data.sessionDow = {};
+  if (!data.sessionDow[w]) data.sessionDow[w] = {};
+  data.sessionDow[w][d] = val === '–' ? '' : val;
+  localStorage.setItem('trainer_data', JSON.stringify(data));
+  renderView();
+}
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+window.onload = () => {
+  loadFromLocalStorage();
+  renderView();
+};
+
+function setRole(r) {
+  currentRole = r;
+  document.getElementById('roleAthleteBtn').classList.toggle('active', r === 'athlete');
+  document.getElementById('rolePTBtn').classList.toggle('active', r === 'pt');
+  renderView();
+}
+
+function showView(v) {
+  currentView = v;
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const views = ['scheda','progressi','panoramica'];
+    t.classList.toggle('active', views[i] === v);
+  });
+  renderView();
+}
+
+// ─────────────────────────────────────────────
+// STORAGE
+// ─────────────────────────────────────────────
+function saveData() {
+  localStorage.setItem('trainer_data', JSON.stringify(data));
+  showToast('✓ Salvato correttamente', 'success');
+}
+
+function loadFromLocalStorage() {
+  const raw = localStorage.getItem('trainer_data');
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+      if (!data.sessionDow) data.sessionDow = {};
+    } catch(e) {}
+  }
+}
+
+function exportJSON() {
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `scheda_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('✓ File JSON esportato', 'success');
+}
+
+function importData(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      data = JSON.parse(ev.target.result);
+      saveData();
+      renderView();
+      showToast('✓ Dati importati', 'success');
+    } catch(err) {
+      showToast('✗ File non valido', 'error');
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+}
+
+// ─────────────────────────────────────────────
+// EXERCISE UTILS
+// ─────────────────────────────────────────────
+function getOrCreateWeekDay(ex, w, d) {
+  if (!ex.weeks) ex.weeks = {};
+  if (!ex.weeks[w]) ex.weeks[w] = {};
+  if (!ex.weeks[w][d]) {
+    // Clone PT series from week 1 day 1 if exists, or create blank
+    const base = ex.weeks[1] && ex.weeks[1][d];
+    if (base) {
+      ex.weeks[w][d] = { series: base.series.map(s => ({
+        carico_pt: s.carico_pt || '',
+        recupero_pt: s.recupero_pt || '',
+        rip_pt: s.rip_pt || '',
+        note_pt: s.note_pt || '',
+        carico: '',
+        recupero: '',
+        rip: '',
+        note: ''
+      }))};
+    } else {
+      ex.weeks[w][d] = { series: [] };
+    }
+  }
+  return ex.weeks[w][d];
+}
+
+function getSeriesForWeekDay(ex, w, d) {
+  if (!ex.weeks || !ex.weeks[w] || !ex.weeks[w][d]) return [];
+  return ex.weeks[w][d].series;
+}
+
+function dayHasData(w, d) {
+  return data.exercises.some(ex => {
+    const s = getSeriesForWeekDay(ex, w, d);
+    return s.some(sr => sr.carico || sr.rip || sr.note);
+  });
+}
+
+function weekHasData(w) {
+  for (let d = 1; d <= 7; d++) {
+    if (dayHasData(w, d)) return true;
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────
+// RENDER
+// ─────────────────────────────────────────────
+function renderView() {
+  const mc = document.getElementById('mainContent');
+  if (currentView === 'scheda') mc.innerHTML = renderScheda();
+  else if (currentView === 'progressi') mc.innerHTML = renderProgressi();
+  else mc.innerHTML = renderPanoramica();
+}
+
+function renderScheda() {
+  const totalEx = data.exercises.length;
+  const serieToday = data.exercises.reduce((acc, ex) => acc + getSeriesForWeekDay(ex, currentWeek, currentDay).length, 0);
+  const doneToday = data.exercises.reduce((acc, ex) => {
+    return acc + getSeriesForWeekDay(ex, currentWeek, currentDay).filter(s => s.carico || s.rip).length;
+  }, 0);
+
+  // Week pills
+  let weekPills = '<div class="week-pills">';
+  for (let w = 1; w <= 8; w++) {
+    const cls = (w === currentWeek ? 'active' : '') + (weekHasData(w) ? ' has-data' : '');
+    weekPills += `<div class="week-pill ${cls}" onclick="selectWeek(${w})">Sett. ${w}</div>`;
+  }
+  weekPills += '</div>';
+
+  // Session pills (numbered 1–7, show dow label underneath if set)
+  let dayPills = '<div class="day-pills">';
+  for (let d = 1; d <= 7; d++) {
+    const dow = getSessionDow(currentWeek, d);
+    const cls = (d === currentDay ? 'active' : '') + (dayHasData(currentWeek, d) || dow ? ' has-data' : '');
+    const dowLabel = dow ? dow.slice(0,3) : '';
+    dayPills += `<div class="day-pill ${cls}" onclick="selectDay(${d})" title="Sessione ${d}${dow ? ' – ' + dow : ''}">
+      <span class="pill-num">${d}</span>
+      ${dowLabel ? `<span class="pill-dow">${dowLabel}</span>` : ''}
+    </div>`;
+  }
+  dayPills += '</div>';
+
+  // Day-of-week picker (athlete only)
+  const currentDow = getSessionDow(currentWeek, currentDay);
+  const dowOptions = DOW_OPTIONS.map(o =>
+    `<option value="${o}" ${currentDow === o || (o==='–' && !currentDow) ? 'selected' : ''}>${o}</option>`
+  ).join('');
+  const dowPicker = `<div class="dow-picker">
+    <label>📅 Giorno della settimana — Sessione ${currentDay}:</label>
+    <select onchange="setSessionDow(${currentWeek},${currentDay},this.value)">${dowOptions}</select>
+    ${currentDow ? `<span class="dow-hint">Sett. ${currentWeek} · Sess. ${currentDay} = <strong style="color:var(--accent)">${currentDow}</strong></span>` : ''}
+  </div>`;
+
+  // Stats
+  const dowDisplay = currentDow || `Sessione ${currentDay}`;
+  let stats = `<div class="stats-bar">
+    <div class="stat-chip"><div class="val">${totalEx}</div><div class="lbl">Esercizi</div></div>
+    <div class="stat-chip"><div class="val">${serieToday}</div><div class="lbl">Serie oggi</div></div>
+    <div class="stat-chip"><div class="val">${doneToday}</div><div class="lbl">Completate</div></div>
+    <div class="stat-chip"><div class="val" style="font-size:14px;padding-top:4px">${dowDisplay}</div><div class="lbl">Giorno</div></div>
+  </div>`;
+
+  // Exercises
+  let exCards = '';
+  if (data.exercises.length === 0) {
+    exCards = `<div class="empty">
+      <div class="empty-icon">🏋️</div>
+      <h3>Nessun Esercizio</h3>
+      <p>${currentRole === 'pt' ? 'Aggiungi esercizi con il pulsante qui sopra.' : 'Il PT non ha ancora inserito esercizi.'}</p>
+    </div>`;
+  } else {
+    data.exercises.forEach((ex, ei) => {
+      const wd = getOrCreateWeekDay(ex, currentWeek, currentDay);
+      const series = wd.series;
+      const open = !!expandedEx[ex.id];
+      exCards += renderExerciseCard(ex, ei, series, open);
+    });
+  }
+
+  const ptBtn = currentRole === 'pt'
+    ? `<button class="btn btn-primary" onclick="openAddEx()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Aggiungi Esercizio
+      </button>` : '';
+
+  return `
+    ${weekPills}
+    ${dayPills}
+    ${dowPicker}
+    <div class="section-header">
+      <div class="section-title">Sett. <span>${currentWeek}</span> · Sess. <span>${currentDay}</span>${currentDow ? ` <span style="font-size:14px;color:var(--text2);font-family:'DM Sans',sans-serif;font-weight:500">– ${currentDow}</span>` : ''}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${ptBtn}
+        <button class="btn btn-secondary" onclick="saveData()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/></svg>
+          Salva
+        </button>
+      </div>
+    </div>
+    ${stats}
+    ${exCards}
+    <div style="text-align:center;padding:24px 0;">
+      <button class="btn btn-export" onclick="exportExcel()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>
+        Esporta Excel
+      </button>
+      <button class="btn btn-import" onclick="exportJSON()" style="margin-left:8px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Salva su Cloud (JSON)
+      </button>
+    </div>
+  `;
+}
+
+function renderExerciseCard(ex, ei, series, open) {
+  const doneCount = series.filter(s => s.carico || s.rip).length;
+  const chevronCls = open ? 'open' : '';
+
+  // PT Table
+  let ptRows = '';
+  series.forEach((s, si) => {
+    ptRows += `<tr>
+      <td><span class="serie-num">${si+1}</span></td>
+      <td><input class="serie-input pt-input" type="text" value="${esc(s.carico_pt)}" ${currentRole!=='pt'?'readonly':''} onchange="updateSerie(${ei},${si},'carico_pt',this.value)" placeholder="–"></td>
+      <td><input class="serie-input pt-input" type="text" value="${esc(s.recupero_pt)}" ${currentRole!=='pt'?'readonly':''} onchange="updateSerie(${ei},${si},'recupero_pt',this.value)" placeholder="–"></td>
+      <td><input class="serie-input pt-input" type="text" value="${esc(s.rip_pt)}" ${currentRole!=='pt'?'readonly':''} onchange="updateSerie(${ei},${si},'rip_pt',this.value)" placeholder="–"></td>
+      <td><input class="serie-input pt-input notes-input" type="text" value="${esc(s.note_pt)}" ${currentRole!=='pt'?'readonly':''} onchange="updateSerie(${ei},${si},'note_pt',this.value)" placeholder="–"></td>
+      ${currentRole==='pt'?`<td><button class="del-btn" onclick="deleteSerie(${ei},${si})" title="Elimina serie"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg></button></td>`:''}
+    </tr>`;
+  });
+
+  const ptAddBtn = currentRole === 'pt' ? `<tr><td colspan="6" style="padding-top:8px"><button class="btn btn-secondary" style="font-size:11px;padding:5px 10px" onclick="addSerie(${ei})">+ Aggiungi serie</button></td></tr>` : '';
+
+  // Athlete Table
+  let doneRows = '';
+  series.forEach((s, si) => {
+    doneRows += `<tr>
+      <td><span class="serie-num">${si+1}</span></td>
+      <td><input class="serie-input" type="text" value="${esc(s.carico)}" onchange="updateSerie(${ei},${si},'carico',this.value)" placeholder="–"></td>
+      <td><input class="serie-input" type="text" value="${esc(s.recupero)}" onchange="updateSerie(${ei},${si},'recupero',this.value)" placeholder="–"></td>
+      <td><input class="serie-input" type="text" value="${esc(s.rip)}" onchange="updateSerie(${ei},${si},'rip',this.value)" placeholder="–"></td>
+      <td><input class="serie-input notes-input" type="text" value="${esc(s.note)}" onchange="updateSerie(${ei},${si},'note',this.value)" placeholder="–"></td>
+    </tr>`;
+  });
+
+  const delExBtn = currentRole === 'pt' ? `<button class="del-btn" onclick="confirmDeleteEx(${ei})" title="Elimina esercizio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg></button>` : '';
+
+  return `
+    <div class="exercise-card" id="ex-${ex.id}">
+      <div class="exercise-header" onclick="toggleEx('${ex.id}')">
+        <div class="exercise-name">${esc(ex.name)}</div>
+        <div class="exercise-meta">
+          <span class="badge pt">${series.length} serie</span>
+          ${doneCount > 0 ? `<span class="badge done">${doneCount}/${series.length} ✓</span>` : ''}
+          ${delExBtn}
+          <svg class="chevron ${chevronCls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div class="exercise-body ${open?'open':''}">
+        <div class="serie-section">
+          <div class="serie-section-title pt-title">📋 Prescrizione PT</div>
+          <div style="overflow-x:auto">
+          <table class="serie-table">
+            <thead><tr>
+              <th>#</th>
+              <th>Carico</th>
+              <th>Recupero</th>
+              <th>Rip.</th>
+              <th>Note PT</th>
+              ${currentRole==='pt'?'<th></th>':''}
+            </tr></thead>
+            <tbody>
+              ${ptRows}
+              ${ptAddBtn}
+            </tbody>
+          </table>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div class="serie-section">
+          <div class="serie-section-title done-title">✅ Eseguito Atleta</div>
+          <div style="overflow-x:auto">
+          <table class="serie-table">
+            <thead><tr>
+              <th>#</th>
+              <th>Carico eff.</th>
+              <th>Recupero</th>
+              <th>Rip.</th>
+              <th>Note</th>
+            </tr></thead>
+            <tbody>${doneRows}</tbody>
+          </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderProgressi() {
+  let rows = '';
+  data.exercises.forEach(ex => {
+    // Find best load
+    let maxLoad = 0;
+    let totalSets = 0;
+    let doneSets = 0;
+    for (let w = 1; w <= 8; w++) {
+      for (let d = 1; d <= 7; d++) {
+        const s = getSeriesForWeekDay(ex, w, d);
+        s.forEach(sr => {
+          totalSets++;
+          if (sr.carico || sr.rip) doneSets++;
+          const l = parseFloat(sr.carico);
+          if (!isNaN(l) && l > maxLoad) maxLoad = l;
+        });
+      }
+    }
+    const pct = totalSets > 0 ? Math.round(doneSets/totalSets*100) : 0;
+    rows += `<tr>
+      <td style="font-weight:600">${esc(ex.name)}</td>
+      <td>${maxLoad > 0 ? maxLoad + ' kg' : '–'}</td>
+      <td>${doneSets}/${totalSets}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:${pct}%"></div></div>
+          <span style="font-size:12px;color:var(--text2)">${pct}%</span>
+        </div>
+      </td>
+    </tr>`;
+  });
+
+  return `
+    <div class="section-header">
+      <div class="section-title">📈 <span>Progressi</span></div>
+    </div>
+    ${data.exercises.length === 0 ? `<div class="empty"><div class="empty-icon">📈</div><h3>Nessun dato</h3><p>Inizia ad inserire esercizi per vedere i progressi.</p></div>` : `
+    <div style="overflow-x:auto">
+    <table class="progress-table">
+      <thead><tr><th>Esercizio</th><th>Carico Max</th><th>Serie Eseguite</th><th>Completamento</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    </div>`}
+  `;
+}
+
+function renderPanoramica() {
+  let html = `<div class="section-title" style="margin-bottom:16px">🗓️ <span>Panoramica</span> Settimanale</div>`;
+
+  for (let w = 1; w <= 8; w++) {
+    const exInWeek = data.exercises.filter(ex => ex.weeks && ex.weeks[w]);
+    if (exInWeek.length === 0) continue;
+    html += `<div style="margin-bottom:20px">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--accent);margin-bottom:8px">Settimana ${w}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px">`;
+
+    for (let d = 1; d <= 7; d++) {
+      const exes = data.exercises.filter(ex => {
+        const s = getSeriesForWeekDay(ex, w, d);
+        return s.length > 0;
+      });
+      if (exes.length === 0) continue;
+      const done = exes.reduce((a, ex) => a + getSeriesForWeekDay(ex, w, d).filter(s => s.carico || s.rip).length, 0);
+      const total = exes.reduce((a, ex) => a + getSeriesForWeekDay(ex, w, d).length, 0);
+      const dow = getSessionDow(w, d);
+      const label = dow ? dow : `Sessione ${d}`;
+      html += `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px;cursor:pointer"
+        onclick="currentWeek=${w};currentDay=${d};showView('scheda')">
+        <div style="font-size:10px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Sess. ${d}</div>
+        <div style="font-family:'Bebas Neue',sans-serif;font-size:16px;color:var(--accent);margin:2px 0">${label}</div>
+        <div style="font-size:12px;color:var(--text)">${exes.length} es.</div>
+        <div style="font-size:11px;color:var(--done-color)">${done}/${total} serie</div>
+      </div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  if (html.endsWith('</div>') === false || data.exercises.length === 0) {
+    html += `<div class="empty"><div class="empty-icon">🗓️</div><h3>Nessuna sessione</h3><p>Inizia aggiungendo esercizi nella scheda.</p></div>`;
+  }
+
+  return html;
+}
+
+// ─────────────────────────────────────────────
+// INTERACTIONS
+// ─────────────────────────────────────────────
+function selectWeek(w) { currentWeek = w; renderView(); }
+function selectDay(d) { currentDay = d; renderView(); }
+
+function toggleEx(id) {
+  expandedEx[id] = !expandedEx[id];
+  renderView();
+}
+
+function updateSerie(ei, si, field, val) {
+  const ex = data.exercises[ei];
+  const wd = getOrCreateWeekDay(ex, currentWeek, currentDay);
+  wd.series[si][field] = val;
+  // Auto-save to localStorage silently
+  localStorage.setItem('trainer_data', JSON.stringify(data));
+}
+
+function addSerie(ei) {
+  const ex = data.exercises[ei];
+  const wd = getOrCreateWeekDay(ex, currentWeek, currentDay);
+  wd.series.push({ carico_pt:'', recupero_pt:'', rip_pt:'', note_pt:'', carico:'', recupero:'', rip:'', note:'' });
+  expandedEx[ex.id] = true;
+  renderView();
+  saveData();
+}
+
+function deleteSerie(ei, si) {
+  const ex = data.exercises[ei];
+  const wd = getOrCreateWeekDay(ex, currentWeek, currentDay);
+  wd.series.splice(si, 1);
+  expandedEx[ex.id] = true;
+  renderView();
+  saveData();
+}
+
+function openAddEx() {
+  document.getElementById('addExModal').classList.add('open');
+  document.getElementById('newExName').focus();
+}
+
+function addExercise() {
+  const name = document.getElementById('newExName').value.trim();
+  const numSerie = parseInt(document.getElementById('newExSerie').value) || 3;
+  const allWeeks = document.getElementById('newExAllWeeks').value === '1';
+
+  if (!name) { showToast('Inserisci il nome dell\'esercizio', 'error'); return; }
+
+  const id = 'ex_' + Date.now();
+  const ex = { id, name, weeks: {} };
+
+  const weeks = allWeeks ? [1,2,3,4,5,6,7,8] : [currentWeek];
+  weeks.forEach(w => {
+    ex.weeks[w] = {};
+    ex.weeks[w][currentDay] = {
+      series: Array.from({length: numSerie}, () => ({
+        carico_pt:'', recupero_pt:'', rip_pt:'', note_pt:'',
+        carico:'', recupero:'', rip:'', note:''
+      }))
+    };
+  });
+
+  data.exercises.push(ex);
+  expandedEx[id] = true;
+  closeModal('addExModal');
+  document.getElementById('newExName').value = '';
+  saveData();
+  renderView();
+  showToast('✓ Esercizio aggiunto', 'success');
+}
+
+function confirmDeleteEx(ei) {
+  const ex = data.exercises[ei];
+  document.getElementById('confirmMsg').textContent = `Eliminare "${ex.name}" da tutte le settimane?`;
+  document.getElementById('confirmOkBtn').onclick = () => {
+    data.exercises.splice(ei, 1);
+    closeModal('confirmModal');
+    saveData();
+    renderView();
+    showToast('✓ Esercizio eliminato', 'success');
+  };
+  document.getElementById('confirmModal').classList.add('open');
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+}
+
+// ─────────────────────────────────────────────
+// EXCEL EXPORT
+// ─────────────────────────────────────────────
+function exportExcel() {
+  // Build CSV content (will open fine in Excel)
+  const rows = [];
+  rows.push(['Settimana','Sessione','Giorno della Settimana','Esercizio','Serie #','Carico PT','Recupero PT','Rip. PT','Note PT','Carico Effettuato','Recupero','Ripetizioni','Note Atleta']);
+
+  data.exercises.forEach(ex => {
+    for (let w = 1; w <= 8; w++) {
+      for (let d = 1; d <= 7; d++) {
+        const series = getSeriesForWeekDay(ex, w, d);
+        const dow = getSessionDow(w, d);
+        series.forEach((s, si) => {
+          rows.push([
+            `Settimana ${w}`, `Sessione ${d}`, dow || '–', ex.name, si+1,
+            s.carico_pt, s.recupero_pt, s.rip_pt, s.note_pt,
+            s.carico, s.recupero, s.rip, s.note
+          ]);
+        });
+      }
+    }
+  });
+
+  const csv = rows.map(r => r.map(c => `"${String(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const BOM = '\uFEFF'; // UTF-8 BOM for Excel
+  const blob = new Blob([BOM + csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `scheda_allenamento_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('✓ Excel esportato', 'success');
+}
+
+// ─────────────────────────────────────────────
+// UTILS
+// ─────────────────────────────────────────────
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showToast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + type;
+  void t.offsetWidth;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// Close modals on overlay click
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
+});
+</script>
+</body>
+</html>
