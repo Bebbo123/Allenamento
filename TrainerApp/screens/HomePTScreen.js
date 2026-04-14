@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, SafeAreaView, TextInput
+  StyleSheet, SafeAreaView, TextInput, Vibration
 } from 'react-native'
 import { supabase } from '../lib/supabase'
 import ProgressiScreen from './ProgressiScreen'
@@ -26,7 +26,7 @@ export default function HomePTScreen() {
 
   async function fetchAtleti() {
     const { data } = await supabase.from('pt_atleta')
-      .select('*, atleta:atleta_id(id, nome, email)')
+      .select('*, atleta:atleta_id(id, nome, email, num_settimane, num_sessioni)')
       .eq('pt_id', profile.id)
       .eq('stato', 'attivo')
     setAtleti(data || [])
@@ -74,7 +74,7 @@ export default function HomePTScreen() {
       <SchedaAtletaPT
         atleta={atletaSelezionato}
         ptId={profile.id}
-        onBack={() => setAtletaSelezionato(null)}
+        onBack={() => { setAtletaSelezionato(null); fetchAtleti() }}
         onProgressi={() => setAtletaProgressi(atletaSelezionato)}
       />
     )
@@ -147,6 +147,9 @@ export default function HomePTScreen() {
                   <View style={styles.atletaInfo}>
                     <Text style={styles.atletaNome}>{a.atleta.nome}</Text>
                     <Text style={styles.atletaEmail}>{a.atleta.email}</Text>
+                    <Text style={styles.atletaMeta}>
+                      {a.atleta.num_settimane || 8} sett. · {a.atleta.num_sessioni || 7} sess.
+                    </Text>
                   </View>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -182,10 +185,36 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
   const [showAddEx, setShowAddEx] = useState(false)
   const [nuovoNome, setNuovoNome] = useState('')
   const [nuovoNumSerie, setNuovoNumSerie] = useState('3')
-  const [propagaSettimane, setPropagaSettimane] = useState(true)
+  const [settimaneSelezionate, setSettimaneSelezionate] = useState([])
+  const [sessioniSelezionate, setSessioniSelezionate] = useState([])
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [completamenti, setCompletamenti] = useState({})
+  const [sessioniCompletate, setSessioniCompletate] = useState({})
+  const [timerAttivo, setTimerAttivo] = useState(null)
+  const [timerSecondi, setTimerSecondi] = useState(0)
+  const timerRef = useRef(null)
+  const [numSettimane, setNumSettimaneState] = useState(atleta.num_settimane || 8)
+  const [numSessioni, setNumSessioniState] = useState(atleta.num_sessioni || 7)
+  const [showConfigScheda, setShowConfigScheda] = useState(false)
+  const [configSett, setConfigSett] = useState(atleta.num_settimane || 8)
+  const [configSess, setConfigSess] = useState(atleta.num_sessioni || 7)
 
-  useEffect(() => { fetchExercises(); fetchSessionDow() }, [settimana, sessione])
+  useEffect(() => {
+    const s = Array.from({length: numSettimane}, (_, i) => i + 1)
+    setSettimaneSelezionate(s)
+    setSessioniSelezionate([sessione])
+  }, [])
+
+  useEffect(() => {
+    fetchExercises()
+    fetchSessionDow()
+    fetchCompletamenti()
+    fetchSessioniCompletate()
+  }, [settimana, sessione])
+
+  useEffect(() => {
+    return () => { if (timerRef.current) clearInterval(timerRef.current) }
+  }, [])
 
   async function fetchSessionDow() {
     const { data } = await supabase.from('session_dow')
@@ -194,6 +223,27 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
       const map = {}
       data.forEach(d => { map[`${d.settimana}_${d.sessione}`] = d.giorno })
       setSessionDow(map)
+    }
+  }
+
+  async function fetchCompletamenti() {
+    const { data } = await supabase.from('completamenti')
+      .select('*').eq('atleta_id', atleta.id)
+      .eq('settimana', settimana).eq('sessione', sessione)
+    if (data) {
+      const map = {}
+      data.forEach(d => { map[d.exercise_id] = d.completato })
+      setCompletamenti(map)
+    }
+  }
+
+  async function fetchSessioniCompletate() {
+    const { data } = await supabase.from('sessioni_completate')
+      .select('*').eq('atleta_id', atleta.id).eq('settimana', settimana)
+    if (data) {
+      const map = {}
+      data.forEach(d => { map[d.sessione] = d.completata })
+      setSessioniCompletate(map)
     }
   }
 
@@ -216,27 +266,42 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
         series_pt: s.series_pt, series_atleta: s.series_atleta
       })
     })
-    setExercises(Object.values(exMap))
+    const sorted = Object.values(exMap).sort((a, b) => (a.ordine || 0) - (b.ordine || 0))
+    setExercises(sorted)
     setLoading(false)
+  }
+
+  async function salvaConfigScheda() {
+    await supabase.from('profiles').update({
+      num_settimane: configSett,
+      num_sessioni: configSess
+    }).eq('id', atleta.id)
+    setNumSettimaneState(configSett)
+    setNumSessioniState(configSess)
+    setShowConfigScheda(false)
   }
 
   async function addExercise() {
     if (!nuovoNome.trim()) return
     const numSerie = parseInt(nuovoNumSerie) || 3
+    const maxOrdine = exercises.length
 
     const { data: ex } = await supabase.from('exercises').insert({
-      atleta_id: atleta.id, nome: nuovoNome.trim(), creato_da: 'pt'
+      atleta_id: atleta.id, nome: nuovoNome.trim(),
+      creato_da: 'pt', ordine: maxOrdine
     }).select().single()
 
-    const settimane = propagaSettimane ? [1,2,3,4,5,6,7,8] : [settimana]
-    for (const w of settimane) {
-      for (let i = 1; i <= numSerie; i++) {
-        await supabase.from('series').insert({
-          exercise_id: ex.id, settimana: w, sessione, numero: i
-        })
+    for (const w of settimaneSelezionate) {
+      for (const s of sessioniSelezionate) {
+        for (let i = 1; i <= numSerie; i++) {
+          await supabase.from('series').insert({
+            exercise_id: ex.id, settimana: w, sessione: s, numero: i
+          })
+        }
       }
     }
-    setNuovoNome(''); setNuovoNumSerie('3'); setPropagaSettimane(true)
+
+    setNuovoNome(''); setNuovoNumSerie('3')
     setShowAddEx(false); fetchExercises()
   }
 
@@ -246,26 +311,57 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
     setConfirmDelete(null); fetchExercises()
   }
 
+  async function spostaEsercizio(exerciseId, direzione) {
+    const idx = exercises.findIndex(e => e.id === exerciseId)
+    if (direzione === 'su' && idx === 0) return
+    if (direzione === 'giu' && idx === exercises.length - 1) return
+
+    const newExercises = [...exercises]
+    const swapIdx = direzione === 'su' ? idx - 1 : idx + 1
+    const temp = newExercises[idx]
+    newExercises[idx] = newExercises[swapIdx]
+    newExercises[swapIdx] = temp
+    setExercises(newExercises)
+
+    await supabase.from('exercises').update({ ordine: swapIdx }).eq('id', newExercises[swapIdx].id)
+    await supabase.from('exercises').update({ ordine: idx }).eq('id', newExercises[idx].id)
+  }
+
   async function updatePT(serieId, field, value) {
     await supabase.from('series_pt').upsert({
       serie_id: serieId, [field]: value
     }, { onConflict: 'serie_id' })
   }
 
-  async function addSerie(exerciseId) {
-    const ex = exercises.find(e => e.id === exerciseId)
-    await supabase.from('series').insert({
-      exercise_id: exerciseId, settimana, sessione, numero: ex.series.length + 1
-    })
-    fetchExercises()
+  function avviaTimer(secondi) {
+    if (timerRef.current) clearInterval(timerRef.current)
+    const sec = parseInt(secondi)
+    if (!sec || sec <= 0) return
+    setTimerAttivo(true)
+    setTimerSecondi(sec)
+    timerRef.current = setInterval(() => {
+      setTimerSecondi(prev => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current)
+          setTimerAttivo(false)
+          Vibration.vibrate([0, 300, 100, 300, 100, 300])
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
   }
 
-  async function deleteSerie(serieId) {
-    await supabase.from('series').delete().eq('id', serieId)
-    fetchExercises()
+  function stopTimer() {
+    if (timerRef.current) clearInterval(timerRef.current)
+    setTimerAttivo(false)
+    setTimerSecondi(0)
   }
 
   const currentDow = sessionDow[`${settimana}_${sessione}`]
+  const sessioneCompletata = sessioniCompletate[sessione]
+  const tutteSettimane = Array.from({length: numSettimane}, (_, i) => i + 1)
+  const tutteSessioni = Array.from({length: numSessioni}, (_, i) => i + 1)
 
   if (loading) return (
     <View style={styles.loading}>
@@ -279,12 +375,34 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
         <TouchableOpacity onPress={onBack} style={styles.backBtn}>
           <Text style={styles.backText}>← Atleti</Text>
         </TouchableOpacity>
-        <Text style={styles.atletaHeaderNome}>{atleta.nome}</Text>
-        <TouchableOpacity onPress={onProgressi} style={styles.logoutBtn}>
-          <Text style={styles.logoutText}>📈</Text>
-        </TouchableOpacity>
+        <Text style={styles.atletaHeaderNome} numberOfLines={1}>{atleta.nome}</Text>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity style={styles.logoutBtn} onPress={() => setShowConfigScheda(!showConfigScheda)}>
+            <Text style={styles.logoutText}>⚙️</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onProgressi} style={styles.logoutBtn}>
+            <Text style={styles.logoutText}>📈</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
+      {/* TIMER OVERLAY */}
+      {timerAttivo !== null && timerSecondi > 0 && (
+        <View style={styles.timerOverlay}>
+          <View style={styles.timerCard}>
+            <Text style={styles.timerLabel}>⏱ Recupero</Text>
+            <Text style={styles.timerSecondi}>{timerSecondi}s</Text>
+            <View style={styles.timerBar}>
+              <View style={[styles.timerBarFill, { width: `${(timerSecondi / (timerSecondi + 1)) * 100}%` }]} />
+            </View>
+            <TouchableOpacity style={styles.timerStop} onPress={stopTimer}>
+              <Text style={styles.timerStopText}>✕ Ferma</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* MODALE ELIMINA */}
       {confirmDelete && (
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
@@ -307,9 +425,46 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
 
+        {/* CONFIG SCHEDA ATLETA */}
+        {showConfigScheda && (
+          <View style={styles.configBox}>
+            <Text style={styles.configTitle}>⚙️ Configura scheda di {atleta.nome}</Text>
+            <View style={styles.configRow}>
+              <View style={styles.configItem}>
+                <Text style={styles.configLabel}>Settimane</Text>
+                <View style={styles.configControls}>
+                  <TouchableOpacity style={styles.configBtn} onPress={() => setConfigSett(Math.max(1, configSett - 1))}>
+                    <Text style={styles.configBtnText}>−</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.configVal}>{configSett}</Text>
+                  <TouchableOpacity style={styles.configBtn} onPress={() => setConfigSett(Math.min(16, configSett + 1))}>
+                    <Text style={styles.configBtnText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <View style={styles.configItem}>
+                <Text style={styles.configLabel}>Sessioni/sett.</Text>
+                <View style={styles.configControls}>
+                  <TouchableOpacity style={styles.configBtn} onPress={() => setConfigSess(Math.max(1, configSess - 1))}>
+                    <Text style={styles.configBtnText}>−</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.configVal}>{configSess}</Text>
+                  <TouchableOpacity style={styles.configBtn} onPress={() => setConfigSess(Math.min(7, configSess + 1))}>
+                    <Text style={styles.configBtnText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+            <TouchableOpacity style={styles.salvaConfigBtn} onPress={salvaConfigScheda}>
+              <Text style={styles.salvaConfigBtnText}>✓ Salva configurazione</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* SETTIMANE */}
         <Text style={styles.sectionLabel}>SETTIMANA</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillsRow}>
-          {[1,2,3,4,5,6,7,8].map(w => (
+          {tutteSettimane.map(w => (
             <TouchableOpacity key={w}
               style={[styles.weekPill, settimana === w && styles.weekPillActive]}
               onPress={() => setSettimana(w)}>
@@ -318,30 +473,44 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
           ))}
         </ScrollView>
 
+        {/* SESSIONI */}
         <Text style={styles.sectionLabel}>SESSIONE</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pillsRow}>
-          {[1,2,3,4,5,6,7].map(s => {
+          {tutteSessioni.map(s => {
             const dow = sessionDow[`${settimana}_${s}`]
+            const completata = sessioniCompletate[s]
             return (
               <TouchableOpacity key={s}
-                style={[styles.sessionPill, sessione === s && styles.sessionPillActive]}
+                style={[
+                  styles.sessionPill,
+                  sessione === s && styles.sessionPillActive,
+                  completata && styles.sessionPillCompleted
+                ]}
                 onPress={() => setSessione(s)}>
-                <Text style={[styles.sessionNum, sessione === s && styles.sessionNumActive]}>{s}</Text>
+                <Text style={[
+                  styles.sessionNum,
+                  sessione === s && styles.sessionNumActive,
+                  completata && styles.sessionNumCompleted
+                ]}>
+                  {completata ? '✓' : s}
+                </Text>
                 {dow && <Text style={[styles.sessionDow, sessione === s && styles.sessionDowActive]}>{dow.slice(0,3)}</Text>}
               </TouchableOpacity>
             )
           })}
         </ScrollView>
 
+        {/* TITOLO */}
         <View style={styles.sessionTitle}>
           <Text style={styles.sessionTitleText}>
             Sett. {settimana} · Sess. {sessione}{currentDow ? ` · ${currentDow}` : ''}
           </Text>
           <TouchableOpacity style={styles.addBtn} onPress={() => setShowAddEx(!showAddEx)}>
-            <Text style={styles.addBtnText}>{showAddEx ? '✕ Chiudi' : '+ Esercizio'}</Text>
+            <Text style={styles.addBtnText}>{showAddEx ? '✕' : '+'}</Text>
           </TouchableOpacity>
         </View>
 
+        {/* FORM AGGIUNTA ESERCIZIO */}
         {showAddEx && (
           <View style={styles.addForm}>
             <TextInput style={styles.addInput} value={nuovoNome} onChangeText={setNuovoNome}
@@ -352,17 +521,56 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
                 value={nuovoNumSerie} onChangeText={setNuovoNumSerie}
                 keyboardType="number-pad" placeholder="3" placeholderTextColor="#6B7280" />
             </View>
-            <TouchableOpacity
-              style={[styles.toggleRow, propagaSettimane && styles.toggleRowActive]}
-              onPress={() => setPropagaSettimane(!propagaSettimane)}>
-              <View style={[styles.toggleDot, propagaSettimane && styles.toggleDotActive]} />
-              <Text style={[styles.toggleText, propagaSettimane && styles.toggleTextActive]}>
-                {propagaSettimane ? '📅 Crea per tutte le 8 settimane' : '📌 Crea solo per settimana ' + settimana}
-              </Text>
-            </TouchableOpacity>
+
+            <Text style={styles.addLabel}>Settimane:</Text>
+            <View style={styles.selezioneGrid}>
+              {tutteSettimane.map(w => (
+                <TouchableOpacity key={w}
+                  style={[styles.selezioneChip, settimaneSelezionate.includes(w) && styles.selezioneChipActive]}
+                  onPress={() => setSettimaneSelezionate(prev =>
+                    prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w]
+                  )}>
+                  <Text style={[styles.selezioneChipText, settimaneSelezionate.includes(w) && styles.selezioneChipTextActive]}>
+                    S{w}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.selezioneActions}>
+              <TouchableOpacity onPress={() => setSettimaneSelezionate(tutteSettimane)}>
+                <Text style={styles.selezioneTutte}>Tutte</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setSettimaneSelezionate([])}>
+                <Text style={styles.selezioneNessuna}>Nessuna</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.addLabel}>Sessioni:</Text>
+            <View style={styles.selezioneGrid}>
+              {tutteSessioni.map(s => (
+                <TouchableOpacity key={s}
+                  style={[styles.selezioneChip, sessioniSelezionate.includes(s) && styles.selezioneChipActive]}
+                  onPress={() => setSessioniSelezionate(prev =>
+                    prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]
+                  )}>
+                  <Text style={[styles.selezioneChipText, sessioniSelezionate.includes(s) && styles.selezioneChipTextActive]}>
+                    {s}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={styles.selezioneActions}>
+              <TouchableOpacity onPress={() => setSessioniSelezionate(tutteSessioni)}>
+                <Text style={styles.selezioneTutte}>Tutte</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setSessioniSelezionate([sessione])}>
+                <Text style={styles.selezioneNessuna}>Solo corrente</Text>
+              </TouchableOpacity>
+            </View>
+
             <View style={styles.addFormBtns}>
               <TouchableOpacity style={styles.addFormCancel}
-                onPress={() => { setShowAddEx(false); setNuovoNome(''); setNuovoNumSerie('3'); setPropagaSettimane(true) }}>
+                onPress={() => { setShowAddEx(false); setNuovoNome('') }}>
                 <Text style={styles.addFormCancelText}>Annulla</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.addFormConfirm} onPress={addExercise}>
@@ -372,6 +580,7 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
           </View>
         )}
 
+        {/* ESERCIZI */}
         {exercises.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyIcon}>📋</Text>
@@ -379,14 +588,28 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
             <Text style={styles.emptyText}>Aggiungi esercizi per questa sessione</Text>
           </View>
         ) : (
-          exercises.map(ex => (
+          exercises.map((ex, idx) => (
             <ExercisePTCard
               key={ex.id}
               exercise={ex}
+              index={idx}
+              total={exercises.length}
               onUpdatePT={updatePT}
-              onAddSerie={() => addSerie(ex.id)}
-              onDeleteSerie={(serieId) => deleteSerie(serieId)}
+              onAddSerie={async () => {
+                const nextNum = ex.series.length + 1
+                await supabase.from('series').insert({
+                  exercise_id: ex.id, settimana, sessione, numero: nextNum
+                })
+                fetchExercises()
+              }}
+              onDeleteSerie={async (serieId) => {
+                await supabase.from('series').delete().eq('id', serieId)
+                fetchExercises()
+              }}
               onDelete={() => setConfirmDelete(ex)}
+              onSposta={spostaEsercizio}
+              completato={!!completamenti[ex.id]}
+              onAvviaTimer={avviaTimer}
             />
           ))
         )}
@@ -397,13 +620,30 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
   )
 }
 
-function ExercisePTCard({ exercise, onUpdatePT, onAddSerie, onDeleteSerie, onDelete }) {
+// ── EXERCISE CARD PT ───────────────────────────
+function ExercisePTCard({ exercise, index, total, onUpdatePT, onAddSerie, onDeleteSerie, onDelete, onSposta, completato, onAvviaTimer }) {
   const [open, setOpen] = useState(true)
 
   return (
-    <View style={cardStyles.card}>
-      <TouchableOpacity style={cardStyles.header} onPress={() => setOpen(!open)}>
-        <Text style={cardStyles.name}>{exercise.nome}</Text>
+    <View style={[cardStyles.card, completato && cardStyles.cardCompleted]}>
+      <View style={cardStyles.header}>
+        <View style={cardStyles.frecce}>
+          <TouchableOpacity
+            style={[cardStyles.freccia, index === 0 && cardStyles.frecciaDisabled]}
+            onPress={() => onSposta(exercise.id, 'su')} disabled={index === 0}>
+            <Text style={cardStyles.frecciaText}>▲</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[cardStyles.freccia, index === total - 1 && cardStyles.frecciaDisabled]}
+            onPress={() => onSposta(exercise.id, 'giu')} disabled={index === total - 1}>
+            <Text style={cardStyles.frecciaText}>▼</Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity style={{ flex: 1 }} onPress={() => setOpen(!open)}>
+          <Text style={cardStyles.name}>{exercise.nome}</Text>
+        </TouchableOpacity>
+
         <View style={cardStyles.meta}>
           <View style={cardStyles.badge}>
             <Text style={cardStyles.badgeText}>{exercise.series.length} serie</Text>
@@ -411,9 +651,11 @@ function ExercisePTCard({ exercise, onUpdatePT, onAddSerie, onDeleteSerie, onDel
           <TouchableOpacity style={cardStyles.deleteBtn} onPress={onDelete}>
             <Text style={cardStyles.deleteBtnText}>🗑</Text>
           </TouchableOpacity>
-          <Text style={cardStyles.chevron}>{open ? '▲' : '▼'}</Text>
+          <TouchableOpacity onPress={() => setOpen(!open)}>
+            <Text style={cardStyles.chevron}>{open ? '▲' : '▼'}</Text>
+          </TouchableOpacity>
         </View>
-      </TouchableOpacity>
+      </View>
 
       {open && (
         <View style={cardStyles.body}>
@@ -427,7 +669,9 @@ function ExercisePTCard({ exercise, onUpdatePT, onAddSerie, onDeleteSerie, onDel
             <Text style={[cardStyles.th, { width: 28 }]}></Text>
           </View>
           {exercise.series.map((s, i) => (
-            <SeriePTRow key={s.id} serie={s} index={i} onUpdate={onUpdatePT} onDelete={() => onDeleteSerie(s.id)} />
+            <SeriePTRow key={s.id} serie={s} index={i}
+              onUpdate={onUpdatePT} onDelete={() => onDeleteSerie(s.id)}
+              onAvviaTimer={onAvviaTimer} />
           ))}
           <TouchableOpacity style={cardStyles.addSerieBtn} onPress={onAddSerie}>
             <Text style={cardStyles.addSerieBtnText}>+ Aggiungi serie</Text>
@@ -456,7 +700,8 @@ function ExercisePTCard({ exercise, onUpdatePT, onAddSerie, onDeleteSerie, onDel
   )
 }
 
-function SeriePTRow({ serie, index, onUpdate, onDelete }) {
+// ── SERIE ROW PT ───────────────────────────────
+function SeriePTRow({ serie, index, onUpdate, onDelete, onAvviaTimer }) {
   const [carico, setCarico] = useState(serie.series_pt?.carico || '')
   const [recupero, setRecupero] = useState(serie.series_pt?.recupero || '')
   const [rip, setRip] = useState(serie.series_pt?.ripetizioni || '')
@@ -471,9 +716,15 @@ function SeriePTRow({ serie, index, onUpdate, onDelete }) {
         <TextInput style={cardStyles.inputPT} value={carico} onChangeText={setCarico}
           onBlur={() => handleBlur('carico', carico)} placeholder="–" placeholderTextColor="#6B7280" />
       </View>
-      <View style={cardStyles.inputWrap}>
-        <TextInput style={cardStyles.inputPT} value={recupero} onChangeText={setRecupero}
-          onBlur={() => handleBlur('recupero', recupero)} placeholder="–" placeholderTextColor="#6B7280" />
+      <View style={[cardStyles.inputWrap, { flexDirection: 'row', alignItems: 'center', gap: 2 }]}>
+        <TextInput style={[cardStyles.inputPT, { flex: 1 }]} value={recupero} onChangeText={setRecupero}
+          onBlur={() => handleBlur('recupero', recupero)} placeholder="sec"
+          placeholderTextColor="#6B7280" keyboardType="number-pad" />
+        {recupero ? (
+          <TouchableOpacity onPress={() => onAvviaTimer(recupero)}>
+            <Text style={{ fontSize: 14, color: '#52e89e' }}>▶</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
       <View style={cardStyles.inputWrap}>
         <TextInput style={cardStyles.inputPT} value={rip} onChangeText={setRip}
@@ -503,9 +754,9 @@ const styles = StyleSheet.create({
   welcome: { fontSize: 13, color: '#9CA3AF', marginTop: 2 },
   logoutBtn: { backgroundColor: '#1e1e24', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
   logoutText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
-  backBtn: { backgroundColor: '#1e1e24', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, width: 90 },
+  backBtn: { backgroundColor: '#1e1e24', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, width: 80 },
   backText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
-  atletaHeaderNome: { fontSize: 16, fontWeight: '800', color: '#f0f0f0', flex: 1, textAlign: 'center' },
+  atletaHeaderNome: { fontSize: 15, fontWeight: '800', color: '#f0f0f0', flex: 1, textAlign: 'center' },
   scroll: { flex: 1 },
   codiceBox: {
     margin: 20, backgroundColor: '#1e1e24', borderWidth: 1,
@@ -533,10 +784,9 @@ const styles = StyleSheet.create({
   btnAccettaText: { color: '#000', fontWeight: '800', fontSize: 13 },
   atletaCard: {
     backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#2e2e3a',
-    borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center',
-    overflow: 'hidden'
+    borderRadius: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', overflow: 'hidden'
   },
-  atletaCardMain: { flex: 1, flexDirection: 'row', alignItems: 'center', padding: 16 },
+  atletaCardMain: { flex: 1, flexDirection: 'row', alignItems: 'center', padding: 14 },
   atletaAvatar: {
     width: 44, height: 44, borderRadius: 22, backgroundColor: '#e8ff4722',
     justifyContent: 'center', alignItems: 'center', marginRight: 14
@@ -545,6 +795,7 @@ const styles = StyleSheet.create({
   atletaInfo: { flex: 1 },
   atletaNome: { fontSize: 15, fontWeight: '700', color: '#f0f0f0' },
   atletaEmail: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
+  atletaMeta: { fontSize: 11, color: '#6B7280', marginTop: 3 },
   progressiBtn: {
     backgroundColor: '#52e89e22', borderLeftWidth: 1, borderLeftColor: '#2e2e3a',
     paddingHorizontal: 14, paddingVertical: 16, justifyContent: 'center'
@@ -559,6 +810,26 @@ const styles = StyleSheet.create({
   emptyIcon: { fontSize: 40, marginBottom: 12 },
   emptyTitle: { fontSize: 18, fontWeight: '800', color: '#f0f0f0', marginBottom: 6 },
   emptyText: { fontSize: 13, color: '#6B7280', textAlign: 'center' },
+  configBox: {
+    margin: 16, backgroundColor: '#1e1e24', borderWidth: 1,
+    borderColor: '#e8ff4744', borderRadius: 14, padding: 16, gap: 12
+  },
+  configTitle: { fontSize: 14, fontWeight: '800', color: '#e8ff47', marginBottom: 4 },
+  configRow: { flexDirection: 'row', gap: 12 },
+  configItem: {
+    flex: 1, backgroundColor: '#26262e', borderWidth: 1, borderColor: '#2e2e3a',
+    borderRadius: 10, padding: 12, alignItems: 'center', gap: 8
+  },
+  configLabel: { fontSize: 11, fontWeight: '700', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.5 },
+  configControls: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  configBtn: {
+    width: 28, height: 28, borderRadius: 14, backgroundColor: '#1e1e24',
+    borderWidth: 1, borderColor: '#2e2e3a', justifyContent: 'center', alignItems: 'center'
+  },
+  configBtnText: { fontSize: 16, color: '#e8ff47', fontWeight: '700' },
+  configVal: { fontSize: 24, fontWeight: '900', color: '#e8ff47', minWidth: 32, textAlign: 'center' },
+  salvaConfigBtn: { backgroundColor: '#e8ff47', borderRadius: 10, padding: 12, alignItems: 'center' },
+  salvaConfigBtnText: { color: '#000', fontWeight: '800', fontSize: 13 },
   sectionLabel: {
     fontSize: 11, fontWeight: '700', color: '#6B7280',
     letterSpacing: 1, paddingHorizontal: 20, marginTop: 20, marginBottom: 8
@@ -576,17 +847,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#2e2e3a', marginRight: 8
   },
   sessionPillActive: { backgroundColor: '#e8ff47', borderColor: '#e8ff47' },
+  sessionPillCompleted: { backgroundColor: '#52e89e22', borderColor: '#52e89e' },
   sessionNum: { fontSize: 18, fontWeight: '900', color: '#9CA3AF' },
   sessionNumActive: { color: '#000' },
+  sessionNumCompleted: { color: '#52e89e' },
   sessionDow: { fontSize: 9, fontWeight: '600', color: '#52e89e', marginTop: 2 },
   sessionDowActive: { color: '#000' },
   sessionTitle: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, marginTop: 20, marginBottom: 12
+    paddingHorizontal: 20, marginTop: 20, marginBottom: 12, gap: 8
   },
-  sessionTitleText: { fontSize: 16, fontWeight: '800', color: '#f0f0f0', flex: 1 },
-  addBtn: { backgroundColor: '#e8ff47', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 8 },
-  addBtnText: { color: '#000', fontWeight: '800', fontSize: 13 },
+  sessionTitleText: { fontSize: 15, fontWeight: '800', color: '#f0f0f0', flex: 1 },
+  addBtn: { backgroundColor: '#e8ff47', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },
+  addBtnText: { color: '#000', fontWeight: '900', fontSize: 18 },
   addForm: {
     backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#2e2e3a',
     borderRadius: 14, marginHorizontal: 16, marginBottom: 12, padding: 16, gap: 12
@@ -596,20 +869,18 @@ const styles = StyleSheet.create({
     borderRadius: 10, padding: 14, color: '#f0f0f0', fontSize: 15
   },
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  addLabel: { fontSize: 13, color: '#9CA3AF', fontWeight: '600' },
-  toggleRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: '#26262e', borderWidth: 1, borderColor: '#2e2e3a',
-    borderRadius: 10, padding: 12
+  addLabel: { fontSize: 12, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
+  selezioneGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  selezioneChip: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
+    backgroundColor: '#26262e', borderWidth: 1, borderColor: '#2e2e3a'
   },
-  toggleRowActive: { borderColor: '#e8ff4766', backgroundColor: '#e8ff4711' },
-  toggleDot: {
-    width: 20, height: 20, borderRadius: 10,
-    backgroundColor: '#2e2e3a', borderWidth: 2, borderColor: '#6B7280'
-  },
-  toggleDotActive: { backgroundColor: '#e8ff47', borderColor: '#e8ff47' },
-  toggleText: { fontSize: 13, color: '#6B7280', fontWeight: '600', flex: 1 },
-  toggleTextActive: { color: '#e8ff47' },
+  selezioneChipActive: { backgroundColor: '#e8ff4722', borderColor: '#e8ff47' },
+  selezioneChipText: { fontSize: 12, fontWeight: '700', color: '#6B7280' },
+  selezioneChipTextActive: { color: '#e8ff47' },
+  selezioneActions: { flexDirection: 'row', gap: 16, marginTop: 4 },
+  selezioneTutte: { fontSize: 12, color: '#52e89e', fontWeight: '600' },
+  selezioneNessuna: { fontSize: 12, color: '#ff6b6b', fontWeight: '600' },
   addFormBtns: { flexDirection: 'row', gap: 10 },
   addFormCancel: {
     flex: 1, backgroundColor: '#26262e', borderRadius: 10, padding: 12, alignItems: 'center'
@@ -640,6 +911,24 @@ const styles = StyleSheet.create({
     borderColor: '#ff3b3b44', borderRadius: 10, padding: 14, alignItems: 'center'
   },
   modalConfirmText: { color: '#ff6b6b', fontWeight: '800', fontSize: 15 },
+  timerOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center',
+    alignItems: 'center', zIndex: 1000, paddingHorizontal: 32
+  },
+  timerCard: {
+    backgroundColor: '#1e1e24', borderWidth: 2, borderColor: '#52e89e',
+    borderRadius: 20, padding: 32, width: '100%', alignItems: 'center', gap: 16
+  },
+  timerLabel: { fontSize: 14, fontWeight: '700', color: '#9CA3AF', letterSpacing: 1 },
+  timerSecondi: { fontSize: 72, fontWeight: '900', color: '#52e89e', lineHeight: 80 },
+  timerBar: { width: '100%', height: 6, backgroundColor: '#2e2e3a', borderRadius: 3, overflow: 'hidden' },
+  timerBarFill: { height: '100%', backgroundColor: '#52e89e', borderRadius: 3 },
+  timerStop: {
+    backgroundColor: '#ff3b3b22', borderWidth: 1, borderColor: '#ff3b3b44',
+    borderRadius: 10, paddingHorizontal: 24, paddingVertical: 10
+  },
+  timerStopText: { color: '#ff6b6b', fontWeight: '700', fontSize: 14 },
 })
 
 const cardStyles = StyleSheet.create({
@@ -647,17 +936,25 @@ const cardStyles = StyleSheet.create({
     backgroundColor: '#16161a', borderWidth: 1, borderColor: '#2e2e3a',
     borderRadius: 14, marginHorizontal: 16, marginBottom: 12, overflow: 'hidden'
   },
+  cardCompleted: { borderColor: '#52e89e44', backgroundColor: '#16201a' },
   header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    padding: 16, backgroundColor: '#1e1e24'
+    flexDirection: 'row', alignItems: 'center',
+    padding: 12, backgroundColor: '#1e1e24', gap: 8
   },
-  name: { fontSize: 15, fontWeight: '700', color: '#f0f0f0', flex: 1 },
-  meta: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  frecce: { flexDirection: 'column', gap: 2 },
+  freccia: {
+    width: 22, height: 22, borderRadius: 4, backgroundColor: '#26262e',
+    justifyContent: 'center', alignItems: 'center'
+  },
+  frecciaDisabled: { opacity: 0.2 },
+  frecciaText: { fontSize: 10, color: '#9CA3AF' },
+  name: { fontSize: 14, fontWeight: '700', color: '#f0f0f0' },
+  meta: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   badge: { backgroundColor: '#7eb8ff22', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   badgeText: { fontSize: 11, fontWeight: '700', color: '#7eb8ff' },
   deleteBtn: { padding: 4 },
-  deleteBtnText: { fontSize: 15 },
-  chevron: { color: '#6B7280', fontSize: 12 },
+  deleteBtnText: { fontSize: 14 },
+  chevron: { color: '#6B7280', fontSize: 12, padding: 4 },
   body: { padding: 16 },
   sectionTitlePT: { fontSize: 11, fontWeight: '700', color: '#7eb8ff', letterSpacing: 1, marginBottom: 10 },
   sectionTitle: { fontSize: 11, fontWeight: '700', color: '#52e89e', letterSpacing: 1, marginBottom: 10 },
