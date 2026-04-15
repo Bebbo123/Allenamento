@@ -4,6 +4,7 @@ import {
   StyleSheet, SafeAreaView, TextInput
 } from 'react-native'
 import { supabase } from '../lib/supabase'
+import StoricoSchede from './StoricoSchede'
 
 export default function ImpostazioniScreen({ onBack }) {
   const [profile, setProfile] = useState(null)
@@ -17,6 +18,12 @@ export default function ImpostazioniScreen({ onBack }) {
   const [numSettimane, setNumSettimane] = useState(8)
   const [numSessioni, setNumSessioni] = useState(7)
   const [salvandoConfig, setSalvandoConfig] = useState(false)
+  const [showConfirmArchivia, setShowConfirmArchivia] = useState(false)
+  const [archiviando, setArchiviando] = useState(false)
+  const [mostraStorico, setMostraStorico] = useState(false)
+  const [schedaAttiva, setSchedaAttiva] = useState(null)
+  const [nomeNuovaScheda, setNomeNuovaScheda] = useState('')
+  const [showNomeScheda, setShowNomeScheda] = useState(false)
 
   useEffect(() => { fetchData() }, [])
 
@@ -27,6 +34,11 @@ export default function ImpostazioniScreen({ onBack }) {
     setNumSettimane(prof?.num_settimane || 8)
     setNumSessioni(prof?.num_sessioni || 7)
     setModificaPTSbloccata(prof?.modifica_pt_sbloccata || false)
+
+    // Carica scheda attiva
+    const { data: scheda } = await supabase.from('schede')
+      .select('*').eq('atleta_id', user.id).eq('stato', 'attiva').single()
+    setSchedaAttiva(scheda)
 
     const { data: collegamenti } = await supabase.from('pt_atleta')
       .select('*, pt:pt_id(id, nome, email, codice_pt)')
@@ -41,9 +53,7 @@ export default function ImpostazioniScreen({ onBack }) {
     setMsg(null)
 
     const { data: ptProfile } = await supabase.from('profiles')
-      .select('*')
-      .eq('codice_pt', codicePT.trim().toUpperCase())
-      .single()
+      .select('*').eq('codice_pt', codicePT.trim().toUpperCase()).single()
 
     if (!ptProfile) {
       setMsg({ tipo: 'errore', testo: 'Codice PT non trovato. Controlla e riprova.' })
@@ -52,7 +62,6 @@ export default function ImpostazioniScreen({ onBack }) {
     }
 
     const { data: { user } } = await supabase.auth.getUser()
-
     const { data: esistente } = await supabase.from('pt_atleta')
       .select('*').eq('pt_id', ptProfile.id).eq('atleta_id', user.id).single()
 
@@ -84,6 +93,15 @@ export default function ImpostazioniScreen({ onBack }) {
       num_settimane: numSettimane,
       num_sessioni: numSessioni
     }).eq('id', user.id)
+
+    // Aggiorna anche la scheda attiva
+    if (schedaAttiva) {
+      await supabase.from('schede').update({
+        num_settimane: numSettimane,
+        num_sessioni: numSessioni
+      }).eq('id', schedaAttiva.id)
+    }
+
     setMsg({ tipo: 'ok', testo: '✓ Configurazione salvata!' })
     setSalvandoConfig(false)
   }
@@ -99,10 +117,60 @@ export default function ImpostazioniScreen({ onBack }) {
     setModificaPTSbloccata(nuovoValore)
     setMsg({
       tipo: 'ok',
-      testo: nuovoValore
-        ? '🔓 Modifica scheda PT sbloccata'
-        : '🔒 Modifica scheda PT bloccata'
+      testo: nuovoValore ? '🔓 Modifica scheda PT sbloccata' : '🔒 Modifica scheda PT bloccata'
     })
+  }
+
+  async function archiviaScheda() {
+    if (!schedaAttiva) return
+    setArchiviando(true)
+    const { data: { user } } = await supabase.auth.getUser()
+
+    // Archivia scheda corrente
+    await supabase.from('schede').update({
+      stato: 'archiviata',
+      archiviata_at: new Date().toISOString(),
+      nome: schedaAttiva.nome
+    }).eq('id', schedaAttiva.id)
+
+    // Conta schede archiviate — se > 6 elimina la più vecchia
+    const { data: archiviate } = await supabase.from('schede')
+      .select('*').eq('atleta_id', user.id).eq('stato', 'archiviata')
+      .order('archiviata_at', { ascending: true })
+
+    if (archiviate && archiviate.length > 6) {
+      const daEliminare = archiviate[0]
+      // Elimina esercizi (cascade elimina series, series_pt, series_atleta)
+      await supabase.from('exercises').delete().eq('scheda_id', daEliminare.id)
+      await supabase.from('schede').delete().eq('id', daEliminare.id)
+    }
+
+    // Conta schede archiviate totali per nome
+    const { count } = await supabase.from('schede')
+      .select('*', { count: 'exact', head: true })
+      .eq('atleta_id', user.id)
+
+    // Crea nuova scheda attiva
+    const nomeScheda = nomeNuovaScheda.trim() || `Scheda ${(count || 0) + 1}`
+    const { data: nuovaScheda } = await supabase.from('schede').insert({
+      atleta_id: user.id,
+      nome: nomeScheda,
+      stato: 'attiva',
+      num_settimane: numSettimane,
+      num_sessioni: numSessioni
+    }).select().single()
+
+    setSchedaAttiva(nuovaScheda)
+    setShowConfirmArchivia(false)
+    setShowNomeScheda(false)
+    setNomeNuovaScheda('')
+    setArchiviando(false)
+    setMsg({ tipo: 'ok', testo: `✓ Scheda archiviata! Nuova scheda "${nomeScheda}" creata.` })
+    fetchData()
+  }
+
+  if (mostraStorico) {
+    return <StoricoSchede onBack={() => setMostraStorico(false)} />
   }
 
   if (loading) return (
@@ -130,8 +198,8 @@ export default function ImpostazioniScreen({ onBack }) {
             </Text>
             <Text style={styles.modalText}>
               {modificaPTSbloccata
-                ? 'Vuoi bloccare la modifica della sezione PT? Non potrai più modificare la prescrizione.'
-                : 'Stai per sbloccare la modifica della sezione PT.\n\nQuesto ti permette di modificare carico, recupero, ripetizioni e note della prescrizione come se fossi un PT.\n\nSei sicuro?'}
+                ? 'Vuoi bloccare la modifica della sezione PT?'
+                : 'Stai per sbloccare la modifica della sezione PT.\n\nQuesto ti permette di modificare carico, recupero, ripetizioni e note della prescrizione.\n\nSei sicuro?'}
             </Text>
             <View style={styles.modalBtns}>
               <TouchableOpacity style={styles.modalCancel} onPress={() => sbloccoModificaPT(false)}>
@@ -140,6 +208,39 @@ export default function ImpostazioniScreen({ onBack }) {
               <TouchableOpacity style={styles.modalConfirm} onPress={() => sbloccoModificaPT(true)}>
                 <Text style={styles.modalConfirmText}>
                   {modificaPTSbloccata ? 'Blocca' : 'Sblocca'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* MODALE CONFERMA ARCHIVIA */}
+      {showConfirmArchivia && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>📦 Archivia Scheda</Text>
+            <Text style={styles.modalText}>
+              La scheda attuale <Text style={{ color: '#f0f0f0', fontWeight: '700' }}>"{schedaAttiva?.nome}"</Text> verrà archiviata e ne verrà creata una nuova vuota.{'\n\n'}
+              Inserisci il nome della nuova scheda (opzionale):
+            </Text>
+            <TextInput
+              style={styles.nomeInput}
+              value={nomeNuovaScheda}
+              onChangeText={setNomeNuovaScheda}
+              placeholder={`Scheda ${(schedaAttiva ? 2 : 1)}`}
+              placeholderTextColor="#6B7280"
+            />
+            <View style={styles.modalBtns}>
+              <TouchableOpacity style={styles.modalCancel}
+                onPress={() => { setShowConfirmArchivia(false); setNomeNuovaScheda('') }}>
+                <Text style={styles.modalCancelText}>Annulla</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalArchiviaBtn, archiviando && { opacity: 0.6 }]}
+                onPress={archiviaScheda} disabled={archiviando}>
+                <Text style={styles.modalArchiviaBtnText}>
+                  {archiviando ? 'Archiviando...' : '📦 Archivia'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -168,55 +269,69 @@ export default function ImpostazioniScreen({ onBack }) {
           </View>
         </View>
 
+        {/* SCHEDA ATTIVA */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📋 Scheda Attiva</Text>
+          <View style={styles.schedaAttivaCard}>
+            <View style={styles.schedaAttivaInfo}>
+              <Text style={styles.schedaAttivaNome}>{schedaAttiva?.nome || 'Scheda 1'}</Text>
+              <Text style={styles.schedaAttivaData}>
+                Creata il {schedaAttiva ? new Date(schedaAttiva.created_at).toLocaleDateString('it-IT', {
+                  day: '2-digit', month: 'long', year: 'numeric'
+                }) : '–'}
+              </Text>
+            </View>
+            <View style={styles.schedaAttivaBtns}>
+              <TouchableOpacity
+                style={styles.storicoBtn}
+                onPress={() => setMostraStorico(true)}>
+                <Text style={styles.storicoBtnText}>📚 Storico</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.archiviaBtn}
+                onPress={() => setShowConfirmArchivia(true)}>
+                <Text style={styles.archiviaBtnText}>📦 Archivia</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
         {/* CONFIGURAZIONE SCHEDA */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📅 Configurazione Scheda</Text>
-
           <View style={styles.configRow}>
             <View style={styles.configItem}>
               <Text style={styles.configLabel}>Settimane</Text>
               <View style={styles.configControls}>
-                <TouchableOpacity
-                  style={styles.configBtn}
-                  onPress={() => setNumSettimane(Math.max(1, numSettimane - 1))}
-                >
+                <TouchableOpacity style={styles.configBtn}
+                  onPress={() => setNumSettimane(Math.max(1, numSettimane - 1))}>
                   <Text style={styles.configBtnText}>−</Text>
                 </TouchableOpacity>
                 <Text style={styles.configVal}>{numSettimane}</Text>
-                <TouchableOpacity
-                  style={styles.configBtn}
-                  onPress={() => setNumSettimane(Math.min(16, numSettimane + 1))}
-                >
+                <TouchableOpacity style={styles.configBtn}
+                  onPress={() => setNumSettimane(Math.min(16, numSettimane + 1))}>
                   <Text style={styles.configBtnText}>+</Text>
                 </TouchableOpacity>
               </View>
             </View>
-
             <View style={styles.configItem}>
               <Text style={styles.configLabel}>Sessioni/sett.</Text>
               <View style={styles.configControls}>
-                <TouchableOpacity
-                  style={styles.configBtn}
-                  onPress={() => setNumSessioni(Math.max(1, numSessioni - 1))}
-                >
+                <TouchableOpacity style={styles.configBtn}
+                  onPress={() => setNumSessioni(Math.max(1, numSessioni - 1))}>
                   <Text style={styles.configBtnText}>−</Text>
                 </TouchableOpacity>
                 <Text style={styles.configVal}>{numSessioni}</Text>
-                <TouchableOpacity
-                  style={styles.configBtn}
-                  onPress={() => setNumSessioni(Math.min(7, numSessioni + 1))}
-                >
+                <TouchableOpacity style={styles.configBtn}
+                  onPress={() => setNumSessioni(Math.min(7, numSessioni + 1))}>
                   <Text style={styles.configBtnText}>+</Text>
                 </TouchableOpacity>
               </View>
             </View>
           </View>
-
           <TouchableOpacity
             style={[styles.salvaBtn, salvandoConfig && styles.salvaBtnDisabled]}
-            onPress={salvaConfigScheda}
-            disabled={salvandoConfig}
-          >
+            onPress={salvaConfigScheda} disabled={salvandoConfig}>
             <Text style={styles.salvaBtnText}>
               {salvandoConfig ? 'Salvando...' : '✓ Salva configurazione'}
             </Text>
@@ -227,12 +342,11 @@ export default function ImpostazioniScreen({ onBack }) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>✏️ Modifica Scheda PT</Text>
           <Text style={styles.hint}>
-            Se non hai un PT o vuoi gestire la tua scheda autonomamente, puoi sbloccare la modifica della sezione prescrizione.
+            Se non hai un PT o vuoi gestire la tua scheda autonomamente, sblocca la modifica della sezione prescrizione.
           </Text>
           <TouchableOpacity
             style={[styles.toggleCard, modificaPTSbloccata && styles.toggleCardActive]}
-            onPress={() => setShowConfirmModifica(true)}
-          >
+            onPress={() => setShowConfirmModifica(true)}>
             <View style={styles.toggleCardLeft}>
               <Text style={styles.toggleCardIcon}>
                 {modificaPTSbloccata ? '🔓' : '🔒'}
@@ -270,13 +384,10 @@ export default function ImpostazioniScreen({ onBack }) {
             />
             <TouchableOpacity
               style={[styles.collegaBtn, cercando && styles.collegaBtnDisabled]}
-              onPress={collegaPT}
-              disabled={cercando}
-            >
+              onPress={collegaPT} disabled={cercando}>
               <Text style={styles.collegaBtnText}>{cercando ? '...' : 'Collega'}</Text>
             </TouchableOpacity>
           </View>
-
           {msg && (
             <View style={[styles.msgBox, msg.tipo === 'ok' ? styles.msgOk : styles.msgErrore]}>
               <Text style={[styles.msgText, msg.tipo === 'ok' ? styles.msgTextOk : styles.msgTextErrore]}>
@@ -350,6 +461,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start'
   },
   ruoloBadgeText: { fontSize: 11, fontWeight: '700', color: '#7eb8ff' },
+  schedaAttivaCard: {
+    backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#e8ff4733',
+    borderRadius: 14, padding: 16, gap: 12
+  },
+  schedaAttivaInfo: { gap: 4 },
+  schedaAttivaNome: { fontSize: 18, fontWeight: '900', color: '#e8ff47' },
+  schedaAttivaData: { fontSize: 12, color: '#9CA3AF' },
+  schedaAttivaBtns: { flexDirection: 'row', gap: 10 },
+  storicoBtn: {
+    flex: 1, backgroundColor: '#7eb8ff22', borderWidth: 1, borderColor: '#7eb8ff44',
+    borderRadius: 10, padding: 12, alignItems: 'center'
+  },
+  storicoBtnText: { color: '#7eb8ff', fontWeight: '700', fontSize: 13 },
+  archiviaBtn: {
+    flex: 1, backgroundColor: '#f59e0b22', borderWidth: 1, borderColor: '#f59e0b44',
+    borderRadius: 10, padding: 12, alignItems: 'center'
+  },
+  archiviaBtnText: { color: '#f59e0b', fontWeight: '700', fontSize: 13 },
   configRow: { flexDirection: 'row', gap: 12, marginBottom: 14 },
   configItem: {
     flex: 1, backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#2e2e3a',
@@ -358,16 +487,12 @@ const styles = StyleSheet.create({
   configLabel: { fontSize: 12, fontWeight: '700', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.5 },
   configControls: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   configBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: '#26262e', borderWidth: 1, borderColor: '#2e2e3a',
-    justifyContent: 'center', alignItems: 'center'
+    width: 32, height: 32, borderRadius: 16, backgroundColor: '#26262e',
+    borderWidth: 1, borderColor: '#2e2e3a', justifyContent: 'center', alignItems: 'center'
   },
   configBtnText: { fontSize: 18, color: '#e8ff47', fontWeight: '700' },
   configVal: { fontSize: 28, fontWeight: '900', color: '#e8ff47', minWidth: 36, textAlign: 'center' },
-  salvaBtn: {
-    backgroundColor: '#e8ff47', borderRadius: 12,
-    padding: 14, alignItems: 'center'
-  },
+  salvaBtn: { backgroundColor: '#e8ff47', borderRadius: 12, padding: 14, alignItems: 'center' },
   salvaBtnDisabled: { opacity: 0.6 },
   salvaBtnText: { color: '#000', fontWeight: '800', fontSize: 14 },
   hint: { fontSize: 13, color: '#9CA3AF', marginBottom: 14, lineHeight: 20 },
@@ -441,7 +566,11 @@ const styles = StyleSheet.create({
     borderRadius: 16, padding: 24, width: '100%'
   },
   modalTitle: { fontSize: 20, fontWeight: '900', color: '#e8ff47', marginBottom: 12 },
-  modalText: { fontSize: 14, color: '#9CA3AF', lineHeight: 22, marginBottom: 20 },
+  modalText: { fontSize: 14, color: '#9CA3AF', lineHeight: 22, marginBottom: 16 },
+  nomeInput: {
+    backgroundColor: '#26262e', borderWidth: 1, borderColor: '#2e2e3a',
+    borderRadius: 10, padding: 14, color: '#f0f0f0', fontSize: 15, marginBottom: 16
+  },
   modalBtns: { flexDirection: 'row', gap: 12 },
   modalCancel: {
     flex: 1, backgroundColor: '#26262e', borderRadius: 10, padding: 14, alignItems: 'center'
@@ -451,4 +580,9 @@ const styles = StyleSheet.create({
     flex: 1, backgroundColor: '#e8ff47', borderRadius: 10, padding: 14, alignItems: 'center'
   },
   modalConfirmText: { color: '#000', fontWeight: '800', fontSize: 15 },
+  modalArchiviaBtn: {
+    flex: 1, backgroundColor: '#f59e0b22', borderWidth: 1,
+    borderColor: '#f59e0b44', borderRadius: 10, padding: 14, alignItems: 'center'
+  },
+  modalArchiviaBtnText: { color: '#f59e0b', fontWeight: '800', fontSize: 15 },
 })

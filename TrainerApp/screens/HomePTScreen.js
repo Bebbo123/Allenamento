@@ -5,6 +5,8 @@ import {
 } from 'react-native'
 import { supabase } from '../lib/supabase'
 import ProgressiScreen from './ProgressiScreen'
+import StoricoSchede from './StoricoSchede'
+import VistaTabella from './VistaTabella'
 
 export default function HomePTScreen() {
   const [profile, setProfile] = useState(null)
@@ -12,6 +14,7 @@ export default function HomePTScreen() {
   const [richieste, setRichieste] = useState([])
   const [atletaSelezionato, setAtletaSelezionato] = useState(null)
   const [atletaProgressi, setAtletaProgressi] = useState(null)
+  const [atletaStorico, setAtletaStorico] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { fetchProfile() }, [])
@@ -61,12 +64,11 @@ export default function HomePTScreen() {
   )
 
   if (atletaProgressi) {
-    return (
-      <ProgressiScreen
-        onBack={() => setAtletaProgressi(null)}
-        atletaId={atletaProgressi.id}
-      />
-    )
+    return <ProgressiScreen onBack={() => setAtletaProgressi(null)} atletaId={atletaProgressi.id} />
+  }
+
+  if (atletaStorico) {
+    return <StoricoSchede onBack={() => setAtletaStorico(null)} atletaId={atletaStorico.id} />
   }
 
   if (atletaSelezionato) {
@@ -76,6 +78,7 @@ export default function HomePTScreen() {
         ptId={profile.id}
         onBack={() => { setAtletaSelezionato(null); fetchAtleti() }}
         onProgressi={() => setAtletaProgressi(atletaSelezionato)}
+        onStorico={() => setAtletaStorico(atletaSelezionato)}
       />
     )
   }
@@ -93,7 +96,6 @@ export default function HomePTScreen() {
       </View>
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-
         <View style={styles.codiceBox}>
           <Text style={styles.codiceLabel}>Il tuo Codice PT</Text>
           <Text style={styles.codice}>{profile?.codice_pt}</Text>
@@ -135,14 +137,9 @@ export default function HomePTScreen() {
           ) : (
             atleti.map(a => (
               <View key={a.id} style={styles.atletaCard}>
-                <TouchableOpacity
-                  style={styles.atletaCardMain}
-                  onPress={() => setAtletaSelezionato(a.atleta)}
-                >
+                <TouchableOpacity style={styles.atletaCardMain} onPress={() => setAtletaSelezionato(a.atleta)}>
                   <View style={styles.atletaAvatar}>
-                    <Text style={styles.atletaAvatarText}>
-                      {a.atleta.nome.charAt(0).toUpperCase()}
-                    </Text>
+                    <Text style={styles.atletaAvatarText}>{a.atleta.nome.charAt(0).toUpperCase()}</Text>
                   </View>
                   <View style={styles.atletaInfo}>
                     <Text style={styles.atletaNome}>{a.atleta.nome}</Text>
@@ -152,16 +149,13 @@ export default function HomePTScreen() {
                     </Text>
                   </View>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.progressiBtn}
-                  onPress={() => setAtletaProgressi(a.atleta)}
-                >
-                  <Text style={styles.progressiBtnText}>📈</Text>
+                <TouchableOpacity style={styles.iconActionBtn} onPress={() => setAtletaStorico(a.atleta)}>
+                  <Text style={styles.iconActionText}>📚</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.schedaBtn}
-                  onPress={() => setAtletaSelezionato(a.atleta)}
-                >
+                <TouchableOpacity style={styles.iconActionBtn} onPress={() => setAtletaProgressi(a.atleta)}>
+                  <Text style={styles.iconActionText}>📈</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.schedaBtn} onPress={() => setAtletaSelezionato(a.atleta)}>
                   <Text style={styles.schedaBtnText}>Scheda →</Text>
                 </TouchableOpacity>
               </View>
@@ -176,7 +170,7 @@ export default function HomePTScreen() {
 }
 
 // ── SCHEDA ATLETA VISTA DAL PT ─────────────────
-function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
+function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
   const [settimana, setSettimana] = useState(1)
   const [sessione, setSessione] = useState(1)
   const [sessionDow, setSessionDow] = useState({})
@@ -198,11 +192,17 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
   const [showConfigScheda, setShowConfigScheda] = useState(false)
   const [configSett, setConfigSett] = useState(atleta.num_settimane || 8)
   const [configSess, setConfigSess] = useState(atleta.num_sessioni || 7)
+  const [vistaTabella, setVistaTabella] = useState(false)
+  const [showConfirmArchivia, setShowConfirmArchivia] = useState(false)
+  const [archiviando, setArchiviando] = useState(false)
+  const [nomeNuovaScheda, setNomeNuovaScheda] = useState('')
+  const [schedaAttiva, setSchedaAttiva] = useState(null)
 
   useEffect(() => {
     const s = Array.from({length: numSettimane}, (_, i) => i + 1)
     setSettimaneSelezionate(s)
     setSessioniSelezionate([sessione])
+    fetchSchedaAttiva()
   }, [])
 
   useEffect(() => {
@@ -215,6 +215,12 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
   useEffect(() => {
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [])
+
+  async function fetchSchedaAttiva() {
+    const { data } = await supabase.from('schede')
+      .select('*').eq('atleta_id', atleta.id).eq('stato', 'attiva').single()
+    setSchedaAttiva(data)
+  }
 
   async function fetchSessionDow() {
     const { data } = await supabase.from('session_dow')
@@ -273,12 +279,51 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
 
   async function salvaConfigScheda() {
     await supabase.from('profiles').update({
-      num_settimane: configSett,
-      num_sessioni: configSess
+      num_settimane: configSett, num_sessioni: configSess
     }).eq('id', atleta.id)
+    if (schedaAttiva) {
+      await supabase.from('schede').update({
+        num_settimane: configSett, num_sessioni: configSess
+      }).eq('id', schedaAttiva.id)
+    }
     setNumSettimaneState(configSett)
     setNumSessioniState(configSess)
     setShowConfigScheda(false)
+  }
+
+  async function archiviaScheda() {
+    if (!schedaAttiva) return
+    setArchiviando(true)
+
+    await supabase.from('schede').update({
+      stato: 'archiviata',
+      archiviata_at: new Date().toISOString()
+    }).eq('id', schedaAttiva.id)
+
+    const { data: archiviate } = await supabase.from('schede')
+      .select('*').eq('atleta_id', atleta.id).eq('stato', 'archiviata')
+      .order('archiviata_at', { ascending: true })
+
+    if (archiviate && archiviate.length > 6) {
+      const daEliminare = archiviate[0]
+      await supabase.from('exercises').delete().eq('scheda_id', daEliminare.id)
+      await supabase.from('schede').delete().eq('id', daEliminare.id)
+    }
+
+    const { count } = await supabase.from('schede')
+      .select('*', { count: 'exact', head: true }).eq('atleta_id', atleta.id)
+
+    const nomeScheda = nomeNuovaScheda.trim() || `Scheda ${(count || 0) + 1}`
+    const { data: nuovaScheda } = await supabase.from('schede').insert({
+      atleta_id: atleta.id, nome: nomeScheda, stato: 'attiva',
+      num_settimane: numSettimane, num_sessioni: numSessioni
+    }).select().single()
+
+    setSchedaAttiva(nuovaScheda)
+    setShowConfirmArchivia(false)
+    setNomeNuovaScheda('')
+    setArchiviando(false)
+    fetchExercises()
   }
 
   async function addExercise() {
@@ -288,7 +333,8 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
 
     const { data: ex } = await supabase.from('exercises').insert({
       atleta_id: atleta.id, nome: nuovoNome.trim(),
-      creato_da: 'pt', ordine: maxOrdine
+      creato_da: 'pt', ordine: maxOrdine,
+      scheda_id: schedaAttiva?.id
     }).select().single()
 
     for (const w of settimaneSelezionate) {
@@ -300,7 +346,6 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
         }
       }
     }
-
     setNuovoNome(''); setNuovoNumSerie('3')
     setShowAddEx(false); fetchExercises()
   }
@@ -315,14 +360,12 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
     const idx = exercises.findIndex(e => e.id === exerciseId)
     if (direzione === 'su' && idx === 0) return
     if (direzione === 'giu' && idx === exercises.length - 1) return
-
     const newExercises = [...exercises]
     const swapIdx = direzione === 'su' ? idx - 1 : idx + 1
     const temp = newExercises[idx]
     newExercises[idx] = newExercises[swapIdx]
     newExercises[swapIdx] = temp
     setExercises(newExercises)
-
     await supabase.from('exercises').update({ ordine: swapIdx }).eq('id', newExercises[swapIdx].id)
     await supabase.from('exercises').update({ ordine: idx }).eq('id', newExercises[idx].id)
   }
@@ -363,6 +406,18 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
   const tutteSettimane = Array.from({length: numSettimane}, (_, i) => i + 1)
   const tutteSessioni = Array.from({length: numSessioni}, (_, i) => i + 1)
 
+  // Vista tabella
+  if (vistaTabella) {
+    return (
+      <VistaTabella
+        onBack={() => setVistaTabella(false)}
+        atletaId={atleta.id}
+        numSettimane={numSettimane}
+        numSessioni={numSessioni}
+      />
+    )
+  }
+
   if (loading) return (
     <View style={styles.loading}>
       <Text style={styles.loadingText}>Caricamento...</Text>
@@ -376,12 +431,18 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
           <Text style={styles.backText}>← Atleti</Text>
         </TouchableOpacity>
         <Text style={styles.atletaHeaderNome} numberOfLines={1}>{atleta.nome}</Text>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TouchableOpacity style={styles.logoutBtn} onPress={() => setShowConfigScheda(!showConfigScheda)}>
-            <Text style={styles.logoutText}>⚙️</Text>
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => setVistaTabella(true)}>
+            <Text style={styles.iconBtnText}>👁</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={onProgressi} style={styles.logoutBtn}>
-            <Text style={styles.logoutText}>📈</Text>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => setShowConfigScheda(!showConfigScheda)}>
+            <Text style={styles.iconBtnText}>⚙️</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconBtn} onPress={onStorico}>
+            <Text style={styles.iconBtnText}>📚</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconBtn} onPress={onProgressi}>
+            <Text style={styles.iconBtnText}>📈</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -408,8 +469,7 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
           <View style={styles.modal}>
             <Text style={styles.modalTitle}>Elimina Esercizio</Text>
             <Text style={styles.modalText}>
-              Vuoi eliminare <Text style={{ color: '#f0f0f0', fontWeight: '700' }}>{confirmDelete.nome}</Text>?{'\n'}
-              Verranno eliminate tutte le serie su tutte le settimane.
+              Vuoi eliminare <Text style={{ color: '#f0f0f0', fontWeight: '700' }}>{confirmDelete.nome}</Text>?
             </Text>
             <View style={styles.modalBtns}>
               <TouchableOpacity style={styles.modalCancel} onPress={() => setConfirmDelete(null)}>
@@ -423,9 +483,42 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
         </View>
       )}
 
+      {/* MODALE ARCHIVIA */}
+      {showConfirmArchivia && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>📦 Archivia Scheda</Text>
+            <Text style={styles.modalText}>
+              Stai archiviando la scheda di <Text style={{ color: '#f0f0f0', fontWeight: '700' }}>{atleta.nome}</Text>.{'\n\n'}
+              Inserisci il nome della nuova scheda (opzionale):
+            </Text>
+            <TextInput
+              style={styles.nomeInput}
+              value={nomeNuovaScheda}
+              onChangeText={setNomeNuovaScheda}
+              placeholder="Es. Scheda Forza 2"
+              placeholderTextColor="#6B7280"
+            />
+            <View style={styles.modalBtns}>
+              <TouchableOpacity style={styles.modalCancel}
+                onPress={() => { setShowConfirmArchivia(false); setNomeNuovaScheda('') }}>
+                <Text style={styles.modalCancelText}>Annulla</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalArchiviaBtn, archiviando && { opacity: 0.6 }]}
+                onPress={archiviaScheda} disabled={archiviando}>
+                <Text style={styles.modalArchiviaBtnText}>
+                  {archiviando ? 'Archiviando...' : '📦 Archivia'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* CONFIG SCHEDA ATLETA */}
+        {/* CONFIG SCHEDA */}
         {showConfigScheda && (
           <View style={styles.configBox}>
             <Text style={styles.configTitle}>⚙️ Configura scheda di {atleta.nome}</Text>
@@ -455,9 +548,26 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
                 </View>
               </View>
             </View>
-            <TouchableOpacity style={styles.salvaConfigBtn} onPress={salvaConfigScheda}>
-              <Text style={styles.salvaConfigBtnText}>✓ Salva configurazione</Text>
-            </TouchableOpacity>
+            <View style={styles.configBtns}>
+              <TouchableOpacity style={styles.salvaConfigBtn} onPress={salvaConfigScheda}>
+                <Text style={styles.salvaConfigBtnText}>✓ Salva</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.archiviaConfigBtn}
+                onPress={() => setShowConfirmArchivia(true)}>
+                <Text style={styles.archiviaConfigBtnText}>📦 Archivia scheda</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* SCHEDA ATTIVA INFO */}
+        {schedaAttiva && (
+          <View style={styles.schedaAttivaBar}>
+            <Text style={styles.schedaAttivaBarText}>📋 {schedaAttiva.nome}</Text>
+            <Text style={styles.schedaAttivaBarSub}>
+              {numSettimane} sett. · {numSessioni} sess.
+            </Text>
           </View>
         )}
 
@@ -528,8 +638,7 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
                 <TouchableOpacity key={w}
                   style={[styles.selezioneChip, settimaneSelezionate.includes(w) && styles.selezioneChipActive]}
                   onPress={() => setSettimaneSelezionate(prev =>
-                    prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w]
-                  )}>
+                    prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w])}>
                   <Text style={[styles.selezioneChipText, settimaneSelezionate.includes(w) && styles.selezioneChipTextActive]}>
                     S{w}
                   </Text>
@@ -551,8 +660,7 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi }) {
                 <TouchableOpacity key={s}
                   style={[styles.selezioneChip, sessioniSelezionate.includes(s) && styles.selezioneChipActive]}
                   onPress={() => setSessioniSelezionate(prev =>
-                    prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]
-                  )}>
+                    prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}>
                   <Text style={[styles.selezioneChipText, sessioniSelezionate.includes(s) && styles.selezioneChipTextActive]}>
                     {s}
                   </Text>
@@ -639,11 +747,9 @@ function ExercisePTCard({ exercise, index, total, onUpdatePT, onAddSerie, onDele
             <Text style={cardStyles.frecciaText}>▼</Text>
           </TouchableOpacity>
         </View>
-
         <TouchableOpacity style={{ flex: 1 }} onPress={() => setOpen(!open)}>
           <Text style={cardStyles.name}>{exercise.nome}</Text>
         </TouchableOpacity>
-
         <View style={cardStyles.meta}>
           <View style={cardStyles.badge}>
             <Text style={cardStyles.badgeText}>{exercise.series.length} serie</Text>
@@ -747,16 +853,18 @@ const styles = StyleSheet.create({
   loadingText: { color: '#9CA3AF', fontSize: 16 },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12,
+    paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12,
     borderBottomWidth: 1, borderBottomColor: '#1e1e24'
   },
   logo: { fontSize: 22, fontWeight: '900', color: '#e8ff47', letterSpacing: 3 },
   welcome: { fontSize: 13, color: '#9CA3AF', marginTop: 2 },
   logoutBtn: { backgroundColor: '#1e1e24', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
   logoutText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
-  backBtn: { backgroundColor: '#1e1e24', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8, width: 80 },
+  iconBtn: { backgroundColor: '#1e1e24', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
+  iconBtnText: { fontSize: 15 },
+  backBtn: { backgroundColor: '#1e1e24', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   backText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
-  atletaHeaderNome: { fontSize: 15, fontWeight: '800', color: '#f0f0f0', flex: 1, textAlign: 'center' },
+  atletaHeaderNome: { fontSize: 14, fontWeight: '800', color: '#f0f0f0', flex: 1, textAlign: 'center', marginHorizontal: 8 },
   scroll: { flex: 1 },
   codiceBox: {
     margin: 20, backgroundColor: '#1e1e24', borderWidth: 1,
@@ -796,14 +904,14 @@ const styles = StyleSheet.create({
   atletaNome: { fontSize: 15, fontWeight: '700', color: '#f0f0f0' },
   atletaEmail: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
   atletaMeta: { fontSize: 11, color: '#6B7280', marginTop: 3 },
-  progressiBtn: {
-    backgroundColor: '#52e89e22', borderLeftWidth: 1, borderLeftColor: '#2e2e3a',
-    paddingHorizontal: 14, paddingVertical: 16, justifyContent: 'center'
+  iconActionBtn: {
+    borderLeftWidth: 1, borderLeftColor: '#2e2e3a',
+    paddingHorizontal: 12, paddingVertical: 16, justifyContent: 'center'
   },
-  progressiBtnText: { fontSize: 18 },
+  iconActionText: { fontSize: 16 },
   schedaBtn: {
     backgroundColor: '#e8ff4722', borderLeftWidth: 1, borderLeftColor: '#2e2e3a',
-    paddingHorizontal: 14, paddingVertical: 16, justifyContent: 'center'
+    paddingHorizontal: 12, paddingVertical: 16, justifyContent: 'center'
   },
   schedaBtnText: { color: '#e8ff47', fontSize: 12, fontWeight: '800' },
   empty: { alignItems: 'center', paddingVertical: 48 },
@@ -814,7 +922,7 @@ const styles = StyleSheet.create({
     margin: 16, backgroundColor: '#1e1e24', borderWidth: 1,
     borderColor: '#e8ff4744', borderRadius: 14, padding: 16, gap: 12
   },
-  configTitle: { fontSize: 14, fontWeight: '800', color: '#e8ff47', marginBottom: 4 },
+  configTitle: { fontSize: 14, fontWeight: '800', color: '#e8ff47' },
   configRow: { flexDirection: 'row', gap: 12 },
   configItem: {
     flex: 1, backgroundColor: '#26262e', borderWidth: 1, borderColor: '#2e2e3a',
@@ -828,8 +936,24 @@ const styles = StyleSheet.create({
   },
   configBtnText: { fontSize: 16, color: '#e8ff47', fontWeight: '700' },
   configVal: { fontSize: 24, fontWeight: '900', color: '#e8ff47', minWidth: 32, textAlign: 'center' },
-  salvaConfigBtn: { backgroundColor: '#e8ff47', borderRadius: 10, padding: 12, alignItems: 'center' },
+  configBtns: { flexDirection: 'row', gap: 10 },
+  salvaConfigBtn: {
+    flex: 1, backgroundColor: '#e8ff47', borderRadius: 10, padding: 12, alignItems: 'center'
+  },
   salvaConfigBtnText: { color: '#000', fontWeight: '800', fontSize: 13 },
+  archiviaConfigBtn: {
+    flex: 1, backgroundColor: '#f59e0b22', borderWidth: 1, borderColor: '#f59e0b44',
+    borderRadius: 10, padding: 12, alignItems: 'center'
+  },
+  archiviaConfigBtnText: { color: '#f59e0b', fontWeight: '700', fontSize: 13 },
+  schedaAttivaBar: {
+    marginHorizontal: 16, marginTop: 12, marginBottom: 4,
+    backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#e8ff4733',
+    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'
+  },
+  schedaAttivaBarText: { fontSize: 13, fontWeight: '700', color: '#e8ff47' },
+  schedaAttivaBarSub: { fontSize: 11, color: '#6B7280' },
   sectionLabel: {
     fontSize: 11, fontWeight: '700', color: '#6B7280',
     letterSpacing: 1, paddingHorizontal: 20, marginTop: 20, marginBottom: 8
@@ -900,7 +1024,11 @@ const styles = StyleSheet.create({
     borderRadius: 16, padding: 24, width: '100%'
   },
   modalTitle: { fontSize: 20, fontWeight: '900', color: '#ff6b6b', marginBottom: 12 },
-  modalText: { fontSize: 14, color: '#9CA3AF', lineHeight: 22, marginBottom: 20 },
+  modalText: { fontSize: 14, color: '#9CA3AF', lineHeight: 22, marginBottom: 16 },
+  nomeInput: {
+    backgroundColor: '#26262e', borderWidth: 1, borderColor: '#2e2e3a',
+    borderRadius: 10, padding: 14, color: '#f0f0f0', fontSize: 15, marginBottom: 16
+  },
   modalBtns: { flexDirection: 'row', gap: 12 },
   modalCancel: {
     flex: 1, backgroundColor: '#26262e', borderRadius: 10, padding: 14, alignItems: 'center'
@@ -911,6 +1039,11 @@ const styles = StyleSheet.create({
     borderColor: '#ff3b3b44', borderRadius: 10, padding: 14, alignItems: 'center'
   },
   modalConfirmText: { color: '#ff6b6b', fontWeight: '800', fontSize: 15 },
+  modalArchiviaBtn: {
+    flex: 1, backgroundColor: '#f59e0b22', borderWidth: 1,
+    borderColor: '#f59e0b44', borderRadius: 10, padding: 14, alignItems: 'center'
+  },
+  modalArchiviaBtnText: { color: '#f59e0b', fontWeight: '800', fontSize: 15 },
   timerOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center',
