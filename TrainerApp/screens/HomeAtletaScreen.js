@@ -28,7 +28,7 @@ export default function HomeAtletaScreen() {
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [completamenti, setCompletamenti] = useState({})
   const [sessioniCompletate, setSessioniCompletate] = useState({})
-  const [timerAttivo, setTimerAttivo] = useState(null)
+  const [timerAttivo, setTimerAttivo] = useState(false)
   const [timerSecondi, setTimerSecondi] = useState(0)
   const timerRef = useRef(null)
   const [numSettimane, setNumSettimane] = useState(8)
@@ -36,6 +36,7 @@ export default function HomeAtletaScreen() {
   const [modificaPTSbloccata, setModificaPTSbloccata] = useState(false)
 
   useEffect(() => { fetchProfile() }, [])
+
   useEffect(() => {
     if (profile) {
       fetchExercises()
@@ -119,7 +120,6 @@ export default function HomeAtletaScreen() {
         series_pt: s.series_pt, series_atleta: s.series_atleta
       })
     })
-
     const sorted = Object.values(exMap).sort((a, b) => (a.ordine || 0) - (b.ordine || 0))
     setExercises(sorted)
     setLoading(false)
@@ -154,7 +154,6 @@ export default function HomeAtletaScreen() {
         }
       }
     }
-
     setNuovoNome('')
     setNuovoNumSerie('3')
     setShowAddEx(false)
@@ -173,18 +172,28 @@ export default function HomeAtletaScreen() {
     fetchExercises()
   }
 
+  async function addSerie(exercise) {
+    const nextNum = exercise.series.length + 1
+    const primasSerie = exercise.series[0]
+    await supabase.from('series').insert({
+      exercise_id: exercise.id,
+      settimana: primasSerie?.settimana || settimana,
+      sessione: primasSerie?.sessione || sessione,
+      numero: nextNum
+    })
+    fetchExercises()
+  }
+
   async function spostaEsercizio(exerciseId, direzione) {
     const idx = exercises.findIndex(e => e.id === exerciseId)
     if (direzione === 'su' && idx === 0) return
     if (direzione === 'giu' && idx === exercises.length - 1) return
-
     const newExercises = [...exercises]
     const swapIdx = direzione === 'su' ? idx - 1 : idx + 1
     const temp = newExercises[idx]
     newExercises[idx] = newExercises[swapIdx]
     newExercises[swapIdx] = temp
     setExercises(newExercises)
-
     await supabase.from('exercises').update({ ordine: swapIdx }).eq('id', newExercises[swapIdx].id)
     await supabase.from('exercises').update({ ordine: idx }).eq('id', newExercises[idx].id)
   }
@@ -261,11 +270,13 @@ export default function HomeAtletaScreen() {
   )
 
   if (mostraImpostazioni) {
-    return <ImpostazioniScreen onBack={() => {
-      setMostraImpostazioni(false)
-      fetchProfile()
-      fetchExercises()
-    }} />
+    return (
+      <ImpostazioniScreen onBack={() => {
+        setMostraImpostazioni(false)
+        fetchProfile()
+        fetchExercises()
+      }} />
+    )
   }
 
   if (mostraProgressi) return <ProgressiScreen onBack={() => setMostraProgressi(false)} />
@@ -275,7 +286,7 @@ export default function HomeAtletaScreen() {
     <SafeAreaView style={styles.container}>
 
       {/* TIMER OVERLAY */}
-      {timerAttivo !== null && timerSecondi > 0 && (
+      {timerAttivo && timerSecondi > 0 && (
         <View style={styles.timerOverlay}>
           <View style={styles.timerCard}>
             <Text style={styles.timerLabel}>⏱ Recupero</Text>
@@ -312,7 +323,7 @@ export default function HomeAtletaScreen() {
         </View>
       </View>
 
-      {/* MODALE CONFERMA ELIMINA ESERCIZIO */}
+      {/* MODALE CONFERMA ELIMINA */}
       {confirmDelete && (
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
@@ -370,9 +381,11 @@ export default function HomeAtletaScreen() {
                 ]}>
                   {completata ? '✓' : s}
                 </Text>
-                {dow && <Text style={[styles.sessionDow, sessione === s && styles.sessionDowActive]}>
-                  {dow.slice(0,3)}
-                </Text>}
+                {dow && (
+                  <Text style={[styles.sessionDow, sessione === s && styles.sessionDowActive]}>
+                    {dow.slice(0,3)}
+                  </Text>
+                )}
               </TouchableOpacity>
             )
           })}
@@ -394,7 +407,7 @@ export default function HomeAtletaScreen() {
           </ScrollView>
         </View>
 
-        {/* TITOLO SESSIONE + COMPLETAMENTO */}
+        {/* TITOLO SESSIONE */}
         <View style={styles.sessionTitle}>
           <Text style={styles.sessionTitleText}>
             Sett. {settimana} · Sess. {sessione}{currentDow ? ` · ${currentDow}` : ''}
@@ -416,13 +429,24 @@ export default function HomeAtletaScreen() {
         {/* FORM AGGIUNTA ESERCIZIO */}
         {showAddEx && (
           <View style={styles.addForm}>
-            <TextInput style={styles.addInput} value={nuovoNome} onChangeText={setNuovoNome}
-              placeholder="Nome esercizio (es. Squat)" placeholderTextColor="#6B7280" autoFocus />
+            <TextInput
+              style={styles.addInput}
+              value={nuovoNome}
+              onChangeText={setNuovoNome}
+              placeholder="Nome esercizio (es. Squat)"
+              placeholderTextColor="#6B7280"
+              autoFocus
+            />
             <View style={styles.addRow}>
               <Text style={styles.addLabel}>Serie:</Text>
-              <TextInput style={[styles.addInput, { flex: 1, textAlign: 'center' }]}
-                value={nuovoNumSerie} onChangeText={setNuovoNumSerie}
-                keyboardType="number-pad" placeholder="3" placeholderTextColor="#6B7280" />
+              <TextInput
+                style={[styles.addInput, { flex: 1, textAlign: 'center' }]}
+                value={nuovoNumSerie}
+                onChangeText={setNuovoNumSerie}
+                keyboardType="number-pad"
+                placeholder="3"
+                placeholderTextColor="#6B7280"
+              />
             </View>
 
             <Text style={styles.addLabel}>Settimane:</Text>
@@ -499,6 +523,7 @@ export default function HomeAtletaScreen() {
               onUpdatePT={updatePT}
               onDelete={() => setConfirmDelete(ex)}
               onDeleteSerie={deleteSerie}
+              onAddSerie={() => addSerie(ex)}
               onSposta={spostaEsercizio}
               completato={!!completamenti[ex.id]}
               onToggleCompletato={() => toggleCompletamentoEsercizio(ex.id)}
@@ -515,7 +540,7 @@ export default function HomeAtletaScreen() {
 }
 
 // ── EXERCISE CARD ─────────────────────────────
-function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, onDeleteSerie, onSposta, completato, onToggleCompletato, onAvviaTimer, modificaPTSbloccata }) {
+function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, onDeleteSerie, onAddSerie, onSposta, completato, onToggleCompletato, onAvviaTimer, modificaPTSbloccata }) {
   const [open, setOpen] = useState(false)
 
   return (
@@ -524,12 +549,14 @@ function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, 
         <View style={cardStyles.frecce}>
           <TouchableOpacity
             style={[cardStyles.freccia, index === 0 && cardStyles.frecciaDisabled]}
-            onPress={() => onSposta(exercise.id, 'su')} disabled={index === 0}>
+            onPress={() => onSposta(exercise.id, 'su')}
+            disabled={index === 0}>
             <Text style={cardStyles.frecciaText}>▲</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[cardStyles.freccia, index === total - 1 && cardStyles.frecciaDisabled]}
-            onPress={() => onSposta(exercise.id, 'giu')} disabled={index === total - 1}>
+            onPress={() => onSposta(exercise.id, 'giu')}
+            disabled={index === total - 1}>
             <Text style={cardStyles.frecciaText}>▼</Text>
           </TouchableOpacity>
         </View>
@@ -560,7 +587,7 @@ function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, 
 
           {/* PRESCRIZIONE PT */}
           <Text style={cardStyles.sectionTitlePT}>
-            📋 Prescrizione PT {modificaPTSbloccata ? '(modificabile)' : ''}
+            📋 Prescrizione PT{modificaPTSbloccata ? ' (modificabile)' : ''}
           </Text>
           <View style={cardStyles.tableHeader}>
             <Text style={[cardStyles.th, { width: 30 }]}>#</Text>
@@ -573,7 +600,9 @@ function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, 
           {exercise.series.map((s, i) => (
             modificaPTSbloccata ? (
               <SeriePTEditabile
-                key={s.id} serie={s} index={i}
+                key={s.id}
+                serie={s}
+                index={i}
                 onUpdate={onUpdatePT}
                 onDelete={() => onDeleteSerie(s.id)}
                 onAvviaTimer={onAvviaTimer}
@@ -582,13 +611,16 @@ function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, 
               <View key={s.id} style={cardStyles.tableRow}>
                 <Text style={[cardStyles.td, { width: 30, color: '#9CA3AF' }]}>{i + 1}</Text>
                 <Text style={cardStyles.tdPT}>{s.series_pt?.carico || '–'}</Text>
-                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                <View style={{ flex: 1, alignItems: 'center' }}>
                   <Text style={cardStyles.tdPT}>{s.series_pt?.recupero || '–'}</Text>
-                  {s.series_pt?.recupero && (
-                    <TouchableOpacity onPress={() => onAvviaTimer(s.series_pt.recupero)}>
-                      <Text style={{ fontSize: 12 }}>▶</Text>
+                  {s.series_pt?.recupero ? (
+                    <TouchableOpacity
+                      style={cardStyles.timerBtn}
+                      onPress={() => onAvviaTimer(s.series_pt.recupero)}
+                      activeOpacity={0.7}>
+                      <Text style={cardStyles.timerBtnText}>▶ {s.series_pt.recupero}s</Text>
                     </TouchableOpacity>
-                  )}
+                  ) : null}
                 </View>
                 <Text style={cardStyles.tdPT}>{s.series_pt?.ripetizioni || '–'}</Text>
                 <Text style={[cardStyles.tdPT, { flex: 1.5 }]}>{s.series_pt?.note || '–'}</Text>
@@ -608,7 +640,9 @@ function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, 
           </View>
           {exercise.series.map((s, i) => (
             <SerieRow
-              key={s.id} serie={s} index={i}
+              key={s.id}
+              serie={s}
+              index={i}
               onUpdate={onUpdate}
               onDelete={() => onDeleteSerie(s.id)}
               onAvviaTimer={onAvviaTimer}
@@ -616,17 +650,7 @@ function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, 
           ))}
 
           {/* AGGIUNGI SERIE */}
-          <TouchableOpacity
-            style={cardStyles.addSerieBtn}
-            onPress={async () => {
-              const nextNum = exercise.series.length + 1
-              await supabase.from('series').insert({
-                exercise_id: exercise.id,
-                settimana: exercise.series[0]?.settimana || 1,
-                sessione: exercise.series[0]?.sessione || 1,
-                numero: nextNum
-              })
-            }}>
+          <TouchableOpacity style={cardStyles.addSerieBtn} onPress={onAddSerie}>
             <Text style={cardStyles.addSerieBtnText}>+ Aggiungi serie</Text>
           </TouchableOpacity>
 
@@ -652,13 +676,16 @@ function SeriePTEditabile({ serie, index, onUpdate, onDelete, onAvviaTimer }) {
         <TextInput style={cardStyles.inputPT} value={carico} onChangeText={setCarico}
           onBlur={() => handleBlur('carico', carico)} placeholder="–" placeholderTextColor="#6B7280" />
       </View>
-      <View style={[cardStyles.inputWrap, { flexDirection: 'row', alignItems: 'center', gap: 2 }]}>
-        <TextInput style={[cardStyles.inputPT, { flex: 1 }]} value={recupero} onChangeText={setRecupero}
+      <View style={[cardStyles.inputWrap, { flexDirection: 'column', gap: 4 }]}>
+        <TextInput style={cardStyles.inputPT} value={recupero} onChangeText={setRecupero}
           onBlur={() => handleBlur('recupero', recupero)} placeholder="sec"
           placeholderTextColor="#6B7280" keyboardType="number-pad" />
         {recupero ? (
-          <TouchableOpacity onPress={() => onAvviaTimer(recupero)}>
-            <Text style={{ fontSize: 14, color: '#52e89e' }}>▶</Text>
+          <TouchableOpacity
+            style={cardStyles.timerBtn}
+            onPress={() => onAvviaTimer(recupero)}
+            activeOpacity={0.7}>
+            <Text style={cardStyles.timerBtnText}>▶ {recupero}s</Text>
           </TouchableOpacity>
         ) : null}
       </View>
@@ -695,13 +722,16 @@ function SerieRow({ serie, index, onUpdate, onDelete, onAvviaTimer }) {
         <TextInput style={cardStyles.input} value={carico} onChangeText={setCarico}
           onBlur={() => handleBlur('carico', carico)} placeholder="–" placeholderTextColor="#6B7280" />
       </View>
-      <View style={[cardStyles.inputWrap, { flexDirection: 'row', alignItems: 'center', gap: 2 }]}>
-        <TextInput style={[cardStyles.input, { flex: 1 }]} value={recupero} onChangeText={setRecupero}
+      <View style={[cardStyles.inputWrap, { flexDirection: 'column', gap: 4 }]}>
+        <TextInput style={cardStyles.input} value={recupero} onChangeText={setRecupero}
           onBlur={() => handleBlur('recupero', recupero)} placeholder="sec"
           placeholderTextColor="#6B7280" keyboardType="number-pad" />
         {recuperoTimer ? (
-          <TouchableOpacity onPress={() => onAvviaTimer(recuperoTimer)}>
-            <Text style={{ fontSize: 14, color: '#52e89e' }}>▶</Text>
+          <TouchableOpacity
+            style={cardStyles.timerBtn}
+            onPress={() => onAvviaTimer(recuperoTimer)}
+            activeOpacity={0.7}>
+            <Text style={cardStyles.timerBtnText}>▶ {recuperoTimer}s</Text>
           </TouchableOpacity>
         ) : null}
       </View>
@@ -784,8 +814,7 @@ const styles = StyleSheet.create({
   completaBtnText: { color: '#9CA3AF', fontWeight: '700', fontSize: 12 },
   completaBtnTextDone: { color: '#52e89e' },
   addBtn: {
-    backgroundColor: '#e8ff47', borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 8
+    backgroundColor: '#e8ff47', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8
   },
   addBtnText: { color: '#000', fontWeight: '900', fontSize: 18 },
   addForm: {
@@ -797,7 +826,10 @@ const styles = StyleSheet.create({
     borderRadius: 10, padding: 14, color: '#f0f0f0', fontSize: 15
   },
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  addLabel: { fontSize: 12, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
+  addLabel: {
+    fontSize: 12, color: '#9CA3AF', fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4
+  },
   selezioneGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   selezioneChip: {
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
@@ -896,11 +928,23 @@ const cardStyles = StyleSheet.create({
   deleteBtnText: { fontSize: 14 },
   chevron: { color: '#6B7280', fontSize: 12, padding: 4 },
   body: { padding: 16 },
-  sectionTitlePT: { fontSize: 11, fontWeight: '700', color: '#7eb8ff', letterSpacing: 1, marginBottom: 10 },
-  sectionTitle: { fontSize: 11, fontWeight: '700', color: '#52e89e', letterSpacing: 1, marginBottom: 10 },
-  tableHeader: { flexDirection: 'row', marginBottom: 6, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: '#2e2e3a' },
+  sectionTitlePT: {
+    fontSize: 11, fontWeight: '700', color: '#7eb8ff',
+    letterSpacing: 1, marginBottom: 10
+  },
+  sectionTitle: {
+    fontSize: 11, fontWeight: '700', color: '#52e89e',
+    letterSpacing: 1, marginBottom: 10
+  },
+  tableHeader: {
+    flexDirection: 'row', marginBottom: 6, paddingBottom: 6,
+    borderBottomWidth: 1, borderBottomColor: '#2e2e3a'
+  },
   th: { flex: 1, fontSize: 10, fontWeight: '700', color: '#6B7280', textAlign: 'center' },
-  tableRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#1e1e2422' },
+  tableRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#1e1e2422'
+  },
   td: { flex: 1, fontSize: 13, color: '#f0f0f0', textAlign: 'center' },
   tdPT: { flex: 1, fontSize: 13, color: '#7eb8ff', textAlign: 'center' },
   inputWrap: { flex: 1, paddingHorizontal: 2 },
@@ -919,4 +963,13 @@ const cardStyles = StyleSheet.create({
     borderWidth: 1, borderColor: '#2e2e3a', borderStyle: 'dashed', alignItems: 'center'
   },
   addSerieBtnText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
+  timerBtn: {
+    backgroundColor: '#52e89e', borderRadius: 6,
+    paddingVertical: 5, paddingHorizontal: 6,
+    alignItems: 'center', justifyContent: 'center',
+    marginTop: 2
+  },
+  timerBtnText: {
+    color: '#000', fontSize: 11, fontWeight: '900', letterSpacing: 0.5
+  },
 })
