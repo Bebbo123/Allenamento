@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, KeyboardAvoidingView, Platform, Alert
+  StyleSheet, KeyboardAvoidingView, Platform
 } from 'react-native'
 import { supabase } from '../lib/supabase'
 
@@ -9,13 +9,36 @@ export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
+  const [errore, setErrore] = useState('')
 
   async function handleLogin() {
-    if (!email || !password) { Alert.alert('Inserisci email e password'); return }
+    if (!email || !password) {
+      setErrore('Inserisci email e password')
+      return
+    }
     setLoading(true)
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) Alert.alert('Errore', error.message)
-    setLoading(false)
+    setErrore('')
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+
+      if (error) {
+        setErrore('Errore: ' + error.message)
+        setLoading(false)
+        return
+      }
+
+      if (!data?.session) {
+        setErrore('Sessione non creata — riprova')
+        setLoading(false)
+        return
+      }
+
+      // Login OK — App.js gestirà il redirect automaticamente
+    } catch (e) {
+      setErrore('Errore di rete: ' + e.message)
+      setLoading(false)
+    }
   }
 
   return (
@@ -48,6 +71,12 @@ export default function LoginScreen({ navigation }) {
             placeholderTextColor="#6B7280"
             secureTextEntry
           />
+
+          {errore !== '' && (
+            <View style={styles.erroreBox}>
+              <Text style={styles.erroreText}>{errore}</Text>
+            </View>
+          )}
 
           <TouchableOpacity
             style={[styles.btn, loading && styles.btnDisabled]}
@@ -89,6 +118,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#2e2e3a',
     borderRadius: 12, padding: 14, color: '#f0f0f0', fontSize: 15
   },
+  erroreBox: {
+    backgroundColor: '#ff3b3b22', borderWidth: 1, borderColor: '#ff3b3b44',
+    borderRadius: 10, padding: 12
+  },
+  erroreText: { color: '#ff6b6b', fontSize: 13, fontWeight: '600', textAlign: 'center' },
   btn: {
     backgroundColor: '#e8ff47', borderRadius: 12,
     padding: 16, alignItems: 'center', marginTop: 8
