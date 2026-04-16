@@ -50,14 +50,12 @@ export default function HomeAtletaScreen() {
       setNumSettimane(profile.num_settimane || 8)
       setNumSessioni(profile.num_sessioni || 7)
       setModificaPTSbloccata(profile.modifica_pt_sbloccata || false)
-      // Inizializza selezioni
       const tutteSettimane = Array.from({length: profile.num_settimane || 8}, (_, i) => i + 1)
       setSettimaneSelezionate(tutteSettimane)
       setSessioniSelezionate([sessione])
     }
   }, [profile])
 
-  // Cleanup timer
   useEffect(() => {
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [])
@@ -122,7 +120,6 @@ export default function HomeAtletaScreen() {
       })
     })
 
-    // Ordina per campo ordine
     const sorted = Object.values(exMap).sort((a, b) => (a.ordine || 0) - (b.ordine || 0))
     setExercises(sorted)
     setLoading(false)
@@ -171,6 +168,11 @@ export default function HomeAtletaScreen() {
     fetchExercises()
   }
 
+  async function deleteSerie(serieId) {
+    await supabase.from('series').delete().eq('id', serieId)
+    fetchExercises()
+  }
+
   async function spostaEsercizio(exerciseId, direzione) {
     const idx = exercises.findIndex(e => e.id === exerciseId)
     if (direzione === 'su' && idx === 0) return
@@ -181,10 +183,8 @@ export default function HomeAtletaScreen() {
     const temp = newExercises[idx]
     newExercises[idx] = newExercises[swapIdx]
     newExercises[swapIdx] = temp
-
     setExercises(newExercises)
 
-    // Salva nuovo ordine
     await supabase.from('exercises').update({ ordine: swapIdx }).eq('id', newExercises[swapIdx].id)
     await supabase.from('exercises').update({ ordine: idx }).eq('id', newExercises[idx].id)
   }
@@ -312,7 +312,7 @@ export default function HomeAtletaScreen() {
         </View>
       </View>
 
-      {/* MODALE CONFERMA ELIMINA */}
+      {/* MODALE CONFERMA ELIMINA ESERCIZIO */}
       {confirmDelete && (
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
@@ -402,8 +402,7 @@ export default function HomeAtletaScreen() {
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <TouchableOpacity
               style={[styles.completaBtn, sessioneCompletata && styles.completaBtnDone]}
-              onPress={toggleSessioneCompletata}
-            >
+              onPress={toggleSessioneCompletata}>
               <Text style={[styles.completaBtnText, sessioneCompletata && styles.completaBtnTextDone]}>
                 {sessioneCompletata ? '✓ Fatto' : '○ Completa'}
               </Text>
@@ -419,7 +418,6 @@ export default function HomeAtletaScreen() {
           <View style={styles.addForm}>
             <TextInput style={styles.addInput} value={nuovoNome} onChangeText={setNuovoNome}
               placeholder="Nome esercizio (es. Squat)" placeholderTextColor="#6B7280" autoFocus />
-
             <View style={styles.addRow}>
               <Text style={styles.addLabel}>Serie:</Text>
               <TextInput style={[styles.addInput, { flex: 1, textAlign: 'center' }]}
@@ -427,17 +425,13 @@ export default function HomeAtletaScreen() {
                 keyboardType="number-pad" placeholder="3" placeholderTextColor="#6B7280" />
             </View>
 
-            {/* SELEZIONE SETTIMANE */}
             <Text style={styles.addLabel}>Settimane:</Text>
             <View style={styles.selezioneGrid}>
               {tutteSettimane.map(w => (
                 <TouchableOpacity key={w}
                   style={[styles.selezioneChip, settimaneSelezionate.includes(w) && styles.selezioneChipActive]}
-                  onPress={() => {
-                    setSettimaneSelezionate(prev =>
-                      prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w]
-                    )
-                  }}>
+                  onPress={() => setSettimaneSelezionate(prev =>
+                    prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w])}>
                   <Text style={[styles.selezioneChipText, settimaneSelezionate.includes(w) && styles.selezioneChipTextActive]}>
                     S{w}
                   </Text>
@@ -453,17 +447,13 @@ export default function HomeAtletaScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* SELEZIONE SESSIONI */}
             <Text style={styles.addLabel}>Sessioni:</Text>
             <View style={styles.selezioneGrid}>
               {tutteSessioni.map(s => (
                 <TouchableOpacity key={s}
                   style={[styles.selezioneChip, sessioniSelezionate.includes(s) && styles.selezioneChipActive]}
-                  onPress={() => {
-                    setSessioniSelezionate(prev =>
-                      prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]
-                    )
-                  }}>
+                  onPress={() => setSessioniSelezionate(prev =>
+                    prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}>
                   <Text style={[styles.selezioneChipText, sessioniSelezionate.includes(s) && styles.selezioneChipTextActive]}>
                     {s}
                   </Text>
@@ -508,6 +498,7 @@ export default function HomeAtletaScreen() {
               onUpdate={updateAtleta}
               onUpdatePT={updatePT}
               onDelete={() => setConfirmDelete(ex)}
+              onDeleteSerie={deleteSerie}
               onSposta={spostaEsercizio}
               completato={!!completamenti[ex.id]}
               onToggleCompletato={() => toggleCompletamentoEsercizio(ex.id)}
@@ -524,24 +515,21 @@ export default function HomeAtletaScreen() {
 }
 
 // ── EXERCISE CARD ─────────────────────────────
-function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, onSposta, completato, onToggleCompletato, onAvviaTimer, modificaPTSbloccata }) {
+function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, onDeleteSerie, onSposta, completato, onToggleCompletato, onAvviaTimer, modificaPTSbloccata }) {
   const [open, setOpen] = useState(false)
 
   return (
     <View style={[cardStyles.card, completato && cardStyles.cardCompleted]}>
       <View style={cardStyles.header}>
-        {/* FRECCE RIORDINO */}
         <View style={cardStyles.frecce}>
           <TouchableOpacity
             style={[cardStyles.freccia, index === 0 && cardStyles.frecciaDisabled]}
-            onPress={() => onSposta(exercise.id, 'su')}
-            disabled={index === 0}>
+            onPress={() => onSposta(exercise.id, 'su')} disabled={index === 0}>
             <Text style={cardStyles.frecciaText}>▲</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[cardStyles.freccia, index === total - 1 && cardStyles.frecciaDisabled]}
-            onPress={() => onSposta(exercise.id, 'giu')}
-            disabled={index === total - 1}>
+            onPress={() => onSposta(exercise.id, 'giu')} disabled={index === total - 1}>
             <Text style={cardStyles.frecciaText}>▼</Text>
           </TouchableOpacity>
         </View>
@@ -571,17 +559,25 @@ function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, 
         <View style={cardStyles.body}>
 
           {/* PRESCRIZIONE PT */}
-          <Text style={cardStyles.sectionTitlePT}>📋 Prescrizione PT {modificaPTSbloccata ? '(modificabile)' : ''}</Text>
+          <Text style={cardStyles.sectionTitlePT}>
+            📋 Prescrizione PT {modificaPTSbloccata ? '(modificabile)' : ''}
+          </Text>
           <View style={cardStyles.tableHeader}>
             <Text style={[cardStyles.th, { width: 30 }]}>#</Text>
             <Text style={cardStyles.th}>Carico</Text>
             <Text style={cardStyles.th}>Rec.</Text>
             <Text style={cardStyles.th}>Rip.</Text>
             <Text style={[cardStyles.th, { flex: 1.5 }]}>Note</Text>
+            {modificaPTSbloccata && <Text style={[cardStyles.th, { width: 28 }]}></Text>}
           </View>
           {exercise.series.map((s, i) => (
             modificaPTSbloccata ? (
-              <SeriePTEditabile key={s.id} serie={s} index={i} onUpdate={onUpdatePT} onAvviaTimer={onAvviaTimer} />
+              <SeriePTEditabile
+                key={s.id} serie={s} index={i}
+                onUpdate={onUpdatePT}
+                onDelete={() => onDeleteSerie(s.id)}
+                onAvviaTimer={onAvviaTimer}
+              />
             ) : (
               <View key={s.id} style={cardStyles.tableRow}>
                 <Text style={[cardStyles.td, { width: 30, color: '#9CA3AF' }]}>{i + 1}</Text>
@@ -608,10 +604,32 @@ function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, 
             <Text style={cardStyles.th}>Rec.</Text>
             <Text style={cardStyles.th}>Rip.</Text>
             <Text style={[cardStyles.th, { flex: 1.5 }]}>Note</Text>
+            <Text style={[cardStyles.th, { width: 28 }]}></Text>
           </View>
           {exercise.series.map((s, i) => (
-            <SerieRow key={s.id} serie={s} index={i} onUpdate={onUpdate} onAvviaTimer={onAvviaTimer} />
+            <SerieRow
+              key={s.id} serie={s} index={i}
+              onUpdate={onUpdate}
+              onDelete={() => onDeleteSerie(s.id)}
+              onAvviaTimer={onAvviaTimer}
+            />
           ))}
+
+          {/* AGGIUNGI SERIE */}
+          <TouchableOpacity
+            style={cardStyles.addSerieBtn}
+            onPress={async () => {
+              const nextNum = exercise.series.length + 1
+              await supabase.from('series').insert({
+                exercise_id: exercise.id,
+                settimana: exercise.series[0]?.settimana || 1,
+                sessione: exercise.series[0]?.sessione || 1,
+                numero: nextNum
+              })
+            }}>
+            <Text style={cardStyles.addSerieBtnText}>+ Aggiungi serie</Text>
+          </TouchableOpacity>
+
         </View>
       )}
     </View>
@@ -619,7 +637,7 @@ function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, 
 }
 
 // ── SERIE ROW PT EDITABILE ─────────────────────
-function SeriePTEditabile({ serie, index, onUpdate, onAvviaTimer }) {
+function SeriePTEditabile({ serie, index, onUpdate, onDelete, onAvviaTimer }) {
   const [carico, setCarico] = useState(serie.series_pt?.carico || '')
   const [recupero, setRecupero] = useState(serie.series_pt?.recupero || '')
   const [rip, setRip] = useState(serie.series_pt?.ripetizioni || '')
@@ -636,8 +654,8 @@ function SeriePTEditabile({ serie, index, onUpdate, onAvviaTimer }) {
       </View>
       <View style={[cardStyles.inputWrap, { flexDirection: 'row', alignItems: 'center', gap: 2 }]}>
         <TextInput style={[cardStyles.inputPT, { flex: 1 }]} value={recupero} onChangeText={setRecupero}
-          onBlur={() => handleBlur('recupero', recupero)} placeholder="sec" placeholderTextColor="#6B7280"
-          keyboardType="number-pad" />
+          onBlur={() => handleBlur('recupero', recupero)} placeholder="sec"
+          placeholderTextColor="#6B7280" keyboardType="number-pad" />
         {recupero ? (
           <TouchableOpacity onPress={() => onAvviaTimer(recupero)}>
             <Text style={{ fontSize: 14, color: '#52e89e' }}>▶</Text>
@@ -652,12 +670,15 @@ function SeriePTEditabile({ serie, index, onUpdate, onAvviaTimer }) {
         <TextInput style={cardStyles.inputPT} value={note} onChangeText={setNote}
           onBlur={() => handleBlur('note', note)} placeholder="–" placeholderTextColor="#6B7280" />
       </View>
+      <TouchableOpacity style={cardStyles.deleteSerie} onPress={onDelete}>
+        <Text style={cardStyles.deleteSerieText}>✕</Text>
+      </TouchableOpacity>
     </View>
   )
 }
 
 // ── SERIE ROW ATLETA ───────────────────────────
-function SerieRow({ serie, index, onUpdate, onAvviaTimer }) {
+function SerieRow({ serie, index, onUpdate, onDelete, onAvviaTimer }) {
   const [carico, setCarico] = useState(serie.series_atleta?.carico || '')
   const [recupero, setRecupero] = useState(serie.series_atleta?.recupero || '')
   const [rip, setRip] = useState(serie.series_atleta?.ripetizioni || '')
@@ -665,7 +686,6 @@ function SerieRow({ serie, index, onUpdate, onAvviaTimer }) {
 
   function handleBlur(field, value) { onUpdate(serie.id, field, value) }
 
-  // Recupero da usare per il timer: quello dell'atleta o quello del PT
   const recuperoTimer = recupero || serie.series_pt?.recupero
 
   return (
@@ -693,6 +713,9 @@ function SerieRow({ serie, index, onUpdate, onAvviaTimer }) {
         <TextInput style={cardStyles.input} value={note} onChangeText={setNote}
           onBlur={() => handleBlur('note', note)} placeholder="–" placeholderTextColor="#6B7280" />
       </View>
+      <TouchableOpacity style={cardStyles.deleteSerie} onPress={onDelete}>
+        <Text style={cardStyles.deleteSerieText}>✕</Text>
+      </TouchableOpacity>
     </View>
   )
 }
@@ -889,4 +912,11 @@ const cardStyles = StyleSheet.create({
     backgroundColor: '#1a2a3a', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 5,
     fontSize: 12, color: '#7eb8ff', textAlign: 'center', borderWidth: 1, borderColor: '#2a4a6a'
   },
+  deleteSerie: { width: 28, alignItems: 'center' },
+  deleteSerieText: { color: '#ff6b6b', fontSize: 14, fontWeight: '700' },
+  addSerieBtn: {
+    marginTop: 8, padding: 10, borderRadius: 8,
+    borderWidth: 1, borderColor: '#2e2e3a', borderStyle: 'dashed', alignItems: 'center'
+  },
+  addSerieBtnText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
 })
