@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase'
 
 export default function RegisterScreen({ navigation }) {
   const [nome, setNome] = useState('')
+  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [ruolo, setRuolo] = useState('atleta')
@@ -22,7 +23,7 @@ export default function RegisterScreen({ navigation }) {
 
   async function handleRegister() {
     if (!nome || !email || !password) {
-      Alert.alert('Errore', 'Compila tutti i campi')
+      Alert.alert('Errore', 'Compila tutti i campi obbligatori')
       return
     }
     if (password.length < 6) {
@@ -30,9 +31,33 @@ export default function RegisterScreen({ navigation }) {
       return
     }
 
+    // Controlla username univoco se inserito
+    if (username.trim()) {
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', username.trim().toLowerCase())
+        .single()
+      if (existing) {
+        Alert.alert('Errore', 'Username già in uso, scegline un altro')
+        return
+      }
+    }
+
     setLoading(true)
 
-    const { data, error } = await supabase.auth.signUp({ email, password })
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          nome,
+          ruolo,
+          username: username.trim().toLowerCase() || null,
+          tipo_account: 'email'
+        }
+      }
+    })
 
     if (error) {
       Alert.alert('Errore', error.message)
@@ -40,16 +65,25 @@ export default function RegisterScreen({ navigation }) {
       return
     }
 
-    const { error: profileError } = await supabase.from('profiles').insert({
-      id: data.user.id,
-      nome,
-      email,
-      ruolo,
-      codice_pt: ruolo === 'pt' ? generateCodice() : null
-    })
+    // Fallback insert profilo se il trigger non scatta
+    if (data.user) {
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', data.user.id)
+        .single()
 
-    if (profileError) {
-      Alert.alert('Errore', profileError.message)
+      if (!existing) {
+        await supabase.from('profiles').insert({
+          id: data.user.id,
+          nome,
+          email,
+          ruolo,
+          username: username.trim().toLowerCase() || null,
+          tipo_account: 'email',
+          codice_pt: ruolo === 'pt' ? generateCodice() : null
+        })
+      }
     }
 
     setLoading(false)
@@ -70,8 +104,7 @@ export default function RegisterScreen({ navigation }) {
         <Text style={styles.subtitle}>Inizia il tuo percorso di allenamento</Text>
 
         <View style={styles.form}>
-
-          <Text style={styles.label}>Nome completo</Text>
+          <Text style={styles.label}>Nome completo *</Text>
           <TextInput
             style={styles.input}
             value={nome}
@@ -80,7 +113,18 @@ export default function RegisterScreen({ navigation }) {
             placeholderTextColor="#6B7280"
           />
 
-          <Text style={styles.label}>Email</Text>
+          <Text style={styles.label}>Username <Text style={styles.optional}>(opzionale)</Text></Text>
+          <TextInput
+            style={styles.input}
+            value={username}
+            onChangeText={setUsername}
+            placeholder="es. mario_rossi"
+            placeholderTextColor="#6B7280"
+            autoCapitalize="none"
+          />
+          <Text style={styles.hint}>Permette di accedere anche senza email</Text>
+
+          <Text style={styles.label}>Email *</Text>
           <TextInput
             style={styles.input}
             value={email}
@@ -91,7 +135,7 @@ export default function RegisterScreen({ navigation }) {
             autoCapitalize="none"
           />
 
-          <Text style={styles.label}>Password</Text>
+          <Text style={styles.label}>Password *</Text>
           <TextInput
             style={styles.input}
             value={password}
@@ -108,9 +152,7 @@ export default function RegisterScreen({ navigation }) {
               onPress={() => setRuolo('atleta')}
             >
               <Text style={styles.roleIcon}>🏋️</Text>
-              <Text style={[styles.roleText, ruolo === 'atleta' && styles.roleTextActive]}>
-                Atleta
-              </Text>
+              <Text style={[styles.roleText, ruolo === 'atleta' && styles.roleTextActive]}>Atleta</Text>
               <Text style={[styles.roleDesc, ruolo === 'atleta' && styles.roleDescActive]}>
                 Mi alleno e registro i progressi
               </Text>
@@ -121,9 +163,7 @@ export default function RegisterScreen({ navigation }) {
               onPress={() => setRuolo('pt')}
             >
               <Text style={styles.roleIcon}>🎓</Text>
-              <Text style={[styles.roleText, ruolo === 'pt' && styles.roleTextActive]}>
-                Personal Trainer
-              </Text>
+              <Text style={[styles.roleText, ruolo === 'pt' && styles.roleTextActive]}>Personal Trainer</Text>
               <Text style={[styles.roleDesc, ruolo === 'pt' && styles.roleDescActive]}>
                 Creo schede per i miei atleti
               </Text>
@@ -147,7 +187,6 @@ export default function RegisterScreen({ navigation }) {
               {loading ? 'Creazione account...' : 'Registrati'}
             </Text>
           </TouchableOpacity>
-
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -163,6 +202,8 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 15, color: '#9CA3AF', marginBottom: 36 },
   form: { gap: 12 },
   label: { fontSize: 13, fontWeight: '600', color: '#D1D5DB' },
+  optional: { color: '#6B7280', fontWeight: '400' },
+  hint: { fontSize: 11, color: '#6B7280', marginTop: -8 },
   input: {
     backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#2e2e3a',
     borderRadius: 12, padding: 14, color: '#f0f0f0', fontSize: 15

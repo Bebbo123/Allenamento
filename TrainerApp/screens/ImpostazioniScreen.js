@@ -23,7 +23,6 @@ export default function ImpostazioniScreen({ onBack }) {
   const [mostraStorico, setMostraStorico] = useState(false)
   const [schedaAttiva, setSchedaAttiva] = useState(null)
   const [nomeNuovaScheda, setNomeNuovaScheda] = useState('')
-  const [showNomeScheda, setShowNomeScheda] = useState(false)
 
   useEffect(() => { fetchData() }, [])
 
@@ -35,7 +34,6 @@ export default function ImpostazioniScreen({ onBack }) {
     setNumSessioni(prof?.num_sessioni || 7)
     setModificaPTSbloccata(prof?.modifica_pt_sbloccata || false)
 
-    // Carica scheda attiva
     const { data: scheda } = await supabase.from('schede')
       .select('*').eq('atleta_id', user.id).eq('stato', 'attiva').single()
     setSchedaAttiva(scheda)
@@ -56,7 +54,7 @@ export default function ImpostazioniScreen({ onBack }) {
       .select('*').eq('codice_pt', codicePT.trim().toUpperCase()).single()
 
     if (!ptProfile) {
-      setMsg({ tipo: 'errore', testo: 'Codice PT non trovato. Controlla e riprova.' })
+      setMsg({ tipo: 'errore', testo: 'Codice PT non trovato.' })
       setCercando(false)
       return
     }
@@ -76,7 +74,7 @@ export default function ImpostazioniScreen({ onBack }) {
     })
 
     setCodicePT('')
-    setMsg({ tipo: 'ok', testo: `Richiesta inviata a ${ptProfile.nome}! Attendi che la accetti.` })
+    setMsg({ tipo: 'ok', testo: `Richiesta inviata a ${ptProfile.nome}!` })
     fetchData()
     setCercando(false)
   }
@@ -90,18 +88,13 @@ export default function ImpostazioniScreen({ onBack }) {
     setSalvandoConfig(true)
     const { data: { user } } = await supabase.auth.getUser()
     await supabase.from('profiles').update({
-      num_settimane: numSettimane,
-      num_sessioni: numSessioni
+      num_settimane: numSettimane, num_sessioni: numSessioni
     }).eq('id', user.id)
-
-    // Aggiorna anche la scheda attiva
     if (schedaAttiva) {
       await supabase.from('schede').update({
-        num_settimane: numSettimane,
-        num_sessioni: numSessioni
+        num_settimane: numSettimane, num_sessioni: numSessioni
       }).eq('id', schedaAttiva.id)
     }
-
     setMsg({ tipo: 'ok', testo: '✓ Configurazione salvata!' })
     setSalvandoConfig(false)
   }
@@ -126,48 +119,38 @@ export default function ImpostazioniScreen({ onBack }) {
     setArchiviando(true)
     const { data: { user } } = await supabase.auth.getUser()
 
-    // Archivia scheda corrente
     await supabase.from('schede').update({
-      stato: 'archiviata',
-      archiviata_at: new Date().toISOString(),
-      nome: schedaAttiva.nome
+      stato: 'archiviata', archiviata_at: new Date().toISOString()
     }).eq('id', schedaAttiva.id)
 
-    // Conta schede archiviate — se > 6 elimina la più vecchia
     const { data: archiviate } = await supabase.from('schede')
       .select('*').eq('atleta_id', user.id).eq('stato', 'archiviata')
       .order('archiviata_at', { ascending: true })
 
     if (archiviate && archiviate.length > 6) {
       const daEliminare = archiviate[0]
-      // Elimina esercizi (cascade elimina series, series_pt, series_atleta)
       await supabase.from('exercises').delete().eq('scheda_id', daEliminare.id)
       await supabase.from('schede').delete().eq('id', daEliminare.id)
     }
 
-    // Conta schede archiviate totali per nome
     const { count } = await supabase.from('schede')
-      .select('*', { count: 'exact', head: true })
-      .eq('atleta_id', user.id)
+      .select('*', { count: 'exact', head: true }).eq('atleta_id', user.id)
 
-    // Crea nuova scheda attiva
     const nomeScheda = nomeNuovaScheda.trim() || `Scheda ${(count || 0) + 1}`
     const { data: nuovaScheda } = await supabase.from('schede').insert({
-      atleta_id: user.id,
-      nome: nomeScheda,
-      stato: 'attiva',
-      num_settimane: numSettimane,
-      num_sessioni: numSessioni
+      atleta_id: user.id, nome: nomeScheda, stato: 'attiva',
+      num_settimane: numSettimane, num_sessioni: numSessioni
     }).select().single()
 
     setSchedaAttiva(nuovaScheda)
     setShowConfirmArchivia(false)
-    setShowNomeScheda(false)
     setNomeNuovaScheda('')
     setArchiviando(false)
     setMsg({ tipo: 'ok', testo: `✓ Scheda archiviata! Nuova scheda "${nomeScheda}" creata.` })
     fetchData()
   }
+
+  const isUsernameAccount = profile?.tipo_account === 'username'
 
   if (mostraStorico) {
     return <StoricoSchede onBack={() => setMostraStorico(false)} />
@@ -221,14 +204,14 @@ export default function ImpostazioniScreen({ onBack }) {
           <View style={styles.modal}>
             <Text style={styles.modalTitle}>📦 Archivia Scheda</Text>
             <Text style={styles.modalText}>
-              La scheda attuale <Text style={{ color: '#f0f0f0', fontWeight: '700' }}>"{schedaAttiva?.nome}"</Text> verrà archiviata e ne verrà creata una nuova vuota.{'\n\n'}
-              Inserisci il nome della nuova scheda (opzionale):
+              La scheda <Text style={{ color: '#f0f0f0', fontWeight: '700' }}>"{schedaAttiva?.nome}"</Text> verrà archiviata.{'\n\n'}
+              Nome della nuova scheda (opzionale):
             </Text>
             <TextInput
               style={styles.nomeInput}
               value={nomeNuovaScheda}
               onChangeText={setNomeNuovaScheda}
-              placeholder={`Scheda ${(schedaAttiva ? 2 : 1)}`}
+              placeholder="es. Scheda Forza 2"
               placeholderTextColor="#6B7280"
             />
             <View style={styles.modalBtns}>
@@ -259,14 +242,39 @@ export default function ImpostazioniScreen({ onBack }) {
                 {profile?.nome?.charAt(0).toUpperCase()}
               </Text>
             </View>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={styles.profiloNome}>{profile?.nome}</Text>
-              <Text style={styles.profiloEmail}>{profile?.email}</Text>
-              <View style={styles.ruoloBadge}>
-                <Text style={styles.ruoloBadgeText}>🏋️ Atleta</Text>
+              {isUsernameAccount ? (
+                <Text style={styles.profiloEmail}>@{profile?.username}</Text>
+              ) : (
+                <Text style={styles.profiloEmail}>{profile?.email}</Text>
+              )}
+              <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                <View style={styles.ruoloBadge}>
+                  <Text style={styles.ruoloBadgeText}>🏋️ Atleta</Text>
+                </View>
+                {isUsernameAccount && (
+                  <View style={styles.usernameBadge}>
+                    <Text style={styles.usernameBadgeText}>👤 Account PT</Text>
+                  </View>
+                )}
+                {profile?.username && !isUsernameAccount && (
+                  <View style={styles.usernameBadge}>
+                    <Text style={styles.usernameBadgeText}>@{profile.username}</Text>
+                  </View>
+                )}
               </View>
             </View>
           </View>
+
+          {/* INFO ACCOUNT USERNAME */}
+          {isUsernameAccount && (
+            <View style={styles.infoBoxPT}>
+              <Text style={styles.infoBoxPTText}>
+                🔒 Il tuo account è gestito dal tuo Personal Trainer. Accedi con username <Text style={{ color: '#e8ff47', fontWeight: '700' }}>@{profile?.username}</Text> e la tua password.
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* SCHEDA ATTIVA */}
@@ -282,14 +290,10 @@ export default function ImpostazioniScreen({ onBack }) {
               </Text>
             </View>
             <View style={styles.schedaAttivaBtns}>
-              <TouchableOpacity
-                style={styles.storicoBtn}
-                onPress={() => setMostraStorico(true)}>
+              <TouchableOpacity style={styles.storicoBtn} onPress={() => setMostraStorico(true)}>
                 <Text style={styles.storicoBtnText}>📚 Storico</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.archiviaBtn}
-                onPress={() => setShowConfirmArchivia(true)}>
+              <TouchableOpacity style={styles.archiviaBtn} onPress={() => setShowConfirmArchivia(true)}>
                 <Text style={styles.archiviaBtnText}>📦 Archivia</Text>
               </TouchableOpacity>
             </View>
@@ -366,36 +370,38 @@ export default function ImpostazioniScreen({ onBack }) {
           </TouchableOpacity>
         </View>
 
-        {/* COLLEGA PT */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🔗 Collega Personal Trainer</Text>
-          <Text style={styles.hint}>
-            Inserisci il codice del tuo PT per permettergli di creare e gestire la tua scheda.
-          </Text>
-          <View style={styles.inputRow}>
-            <TextInput
-              style={styles.codiceInput}
-              value={codicePT}
-              onChangeText={setCodicePT}
-              placeholder="Es. PT-A3F92"
-              placeholderTextColor="#6B7280"
-              autoCapitalize="characters"
-              maxLength={8}
-            />
-            <TouchableOpacity
-              style={[styles.collegaBtn, cercando && styles.collegaBtnDisabled]}
-              onPress={collegaPT} disabled={cercando}>
-              <Text style={styles.collegaBtnText}>{cercando ? '...' : 'Collega'}</Text>
-            </TouchableOpacity>
-          </View>
-          {msg && (
-            <View style={[styles.msgBox, msg.tipo === 'ok' ? styles.msgOk : styles.msgErrore]}>
-              <Text style={[styles.msgText, msg.tipo === 'ok' ? styles.msgTextOk : styles.msgTextErrore]}>
-                {msg.testo}
-              </Text>
+        {/* COLLEGA PT — solo per account email e non già vincolati */}
+        {!isUsernameAccount && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>🔗 Collega Personal Trainer</Text>
+            <Text style={styles.hint}>
+              Inserisci il codice del tuo PT per permettergli di creare e gestire la tua scheda.
+            </Text>
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.codiceInput}
+                value={codicePT}
+                onChangeText={setCodicePT}
+                placeholder="Es. PT-A3F92"
+                placeholderTextColor="#6B7280"
+                autoCapitalize="characters"
+                maxLength={8}
+              />
+              <TouchableOpacity
+                style={[styles.collegaBtn, cercando && styles.collegaBtnDisabled]}
+                onPress={collegaPT} disabled={cercando}>
+                <Text style={styles.collegaBtnText}>{cercando ? '...' : 'Collega'}</Text>
+              </TouchableOpacity>
             </View>
-          )}
-        </View>
+            {msg && (
+              <View style={[styles.msgBox, msg.tipo === 'ok' ? styles.msgOk : styles.msgErrore]}>
+                <Text style={[styles.msgText, msg.tipo === 'ok' ? styles.msgTextOk : styles.msgTextErrore]}>
+                  {msg.testo}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
 
         {/* PT COLLEGATI */}
         {ptCollegati.length > 0 && (
@@ -416,9 +422,12 @@ export default function ImpostazioniScreen({ onBack }) {
                     </Text>
                   </View>
                 </View>
-                <TouchableOpacity style={styles.scollegaBtn} onPress={() => scollegaPT(c.id)}>
-                  <Text style={styles.scollegaBtnText}>Scollega</Text>
-                </TouchableOpacity>
+                {/* Nasconde scollega per account username */}
+                {!isUsernameAccount && (
+                  <TouchableOpacity style={styles.scollegaBtn} onPress={() => scollegaPT(c.id)}>
+                    <Text style={styles.scollegaBtnText}>Scollega</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ))}
           </View>
@@ -455,12 +464,22 @@ const styles = StyleSheet.create({
   },
   avatarText: { fontSize: 22, fontWeight: '900', color: '#e8ff47' },
   profiloNome: { fontSize: 16, fontWeight: '700', color: '#f0f0f0', marginBottom: 4 },
-  profiloEmail: { fontSize: 13, color: '#9CA3AF', marginBottom: 8 },
+  profiloEmail: { fontSize: 13, color: '#9CA3AF', marginBottom: 4 },
   ruoloBadge: {
     backgroundColor: '#7eb8ff22', borderRadius: 6,
     paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start'
   },
   ruoloBadgeText: { fontSize: 11, fontWeight: '700', color: '#7eb8ff' },
+  usernameBadge: {
+    backgroundColor: '#f59e0b22', borderRadius: 6,
+    paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start'
+  },
+  usernameBadgeText: { fontSize: 11, fontWeight: '700', color: '#f59e0b' },
+  infoBoxPT: {
+    marginTop: 12, backgroundColor: '#f59e0b11', borderWidth: 1,
+    borderColor: '#f59e0b33', borderRadius: 12, padding: 14
+  },
+  infoBoxPTText: { fontSize: 13, color: '#f59e0b', lineHeight: 20 },
   schedaAttivaCard: {
     backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#e8ff4733',
     borderRadius: 14, padding: 16, gap: 12

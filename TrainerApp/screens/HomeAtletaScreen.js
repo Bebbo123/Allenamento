@@ -20,12 +20,18 @@ export default function HomeAtletaScreen() {
   const [showAddEx, setShowAddEx] = useState(false)
   const [nuovoNome, setNuovoNome] = useState('')
   const [nuovoNumSerie, setNuovoNumSerie] = useState('3')
+  const [nuovoCarico, setNuovoCarico] = useState('')
+  const [nuovoRecupero, setNuovoRecupero] = useState('')
+  const [nuovoRip, setNuovoRip] = useState('')
+  const [nuovoNote, setNuovoNote] = useState('')
   const [settimaneSelezionate, setSettimaneSelezionate] = useState([])
   const [sessioniSelezionate, setSessioniSelezionate] = useState([])
   const [mostraImpostazioni, setMostraImpostazioni] = useState(false)
   const [mostraProgressi, setMostraProgressi] = useState(false)
   const [mostraExport, setMostraExport] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [confirmSovrascrittura, setConfirmSovrascrittura] = useState(null)
+  const [pendingExerciseData, setPendingExerciseData] = useState(null)
   const [completamenti, setCompletamenti] = useState({})
   const [sessioniCompletate, setSessioniCompletate] = useState({})
   const [timerAttivo, setTimerAttivo] = useState(false)
@@ -134,30 +140,190 @@ export default function HomeAtletaScreen() {
     fetchSessionDow()
   }
 
+  // Controlla se esistono già dati PT nelle sessioni/settimane selezionate
+  async function checkSovrascrittura(exId, settimane, sessioni) {
+    const conflicts = []
+    for (const w of settimane) {
+      for (const s of sessioni) {
+        if (w === settimana && s === sessione) continue // skip sessione corrente
+        const { data } = await supabase.from('series')
+          .select('*, series_pt(*)')
+          .eq('exercise_id', exId)
+          .eq('settimana', w)
+          .eq('sessione', s)
+        if (data && data.length > 0) {
+          const hasPT = data.some(d => d.series_pt && (d.series_pt.carico || d.series_pt.ripetizioni || d.series_pt.recupero || d.series_pt.note))
+          if (hasPT) conflicts.push({ settimana: w, sessione: s })
+        }
+      }
+    }
+    return conflicts
+  }
+
   async function addExercise() {
     if (!nuovoNome.trim()) return
     const { data: { user } } = await supabase.auth.getUser()
     const numSerie = parseInt(nuovoNumSerie) || 3
     const maxOrdine = exercises.length
 
+    // Crea l'esercizio
     const { data: ex } = await supabase.from('exercises').insert({
       atleta_id: user.id, nome: nuovoNome.trim(),
       creato_da: 'atleta', ordine: maxOrdine
     }).select().single()
 
+    // Crea serie per la sessione corrente con valori PT
+    const serieIds = []
+    for (let i = 1; i <= numSerie; i++) {
+      const { data: serie } = await supabase.from('series').insert({
+        exercise_id: ex.id, settimana, sessione, numero: i
+      }).select().single()
+      serieIds.push(serie.id)
+
+      // Inserisce valori PT nella sessione corrente
+      if (nuovoCarico || nuovoRecupero || nuovoRip || nuovoNote) {
+        await supabase.from('series_pt').insert({
+          serie_id: serie.id,
+          carico: nuovoCarico || null,
+          recupero: nuovoRecupero || null,
+          ripetizioni: nuovoRip || null,
+          note: nuovoNote || null
+        })
+      }
+    }
+
+    // Altre settimane/sessioni selezionate (escludi corrente)
+    const altreDestinazioni = []
     for (const w of settimaneSelezionate) {
       for (const s of sessioniSelezionate) {
-        for (let i = 1; i <= numSerie; i++) {
-          await supabase.from('series').insert({
-            exercise_id: ex.id, settimana: w, sessione: s, numero: i
+        if (w === settimana && s === sessione) continue
+        altreDestinazioni.push({ w, s })
+      }
+    }
+
+    if (altreDestinazioni.length === 0) {
+      resetForm()
+      fetchExercises()
+      return
+    }
+
+    // Controlla sovrascritture (in questo caso l'esercizio è nuovo
+    // quindi non ci sono conflitti, ma salviamo i dati per dopo)
+    const haValoriPT = nuovoCarico || nuovoRecupero || nuovoRip || nuovoNote
+
+    // Crea serie per le altre destinazioni
+    for (const { w, s } of altreDestinazioni) {
+      for (let i = 1; i <= numSerie; i++) {
+        const { data: serie } = await supabase.from('series').insert({
+          exercise_id: ex.id, settimana: w, sessione: s, numero: i
+        }).select().single()
+
+        if (haValoriPT) {
+          await supabase.from('series_pt').insert({
+            serie_id: serie.id,
+            carico: nuovoCarico || null,
+            recupero: nuovoRecupero || null,
+            ripetizioni: nuovoRip || null,
+            note: nuovoNote || null
           })
         }
       }
     }
+
+    resetForm()
+    fetchExercises()
+  }
+
+  // Copia valori PT su esercizio esistente con controllo sovrascrittura
+  async function copiaPTsuEsercizio(exercise, settimaneTarget, sessioniTarget) {
+    // Prendi i valori PT della sessione corrente
+    const valoriPT = {}
+    exercise.series.forEach((s, i) => {
+      valoriPT[i + 1] = {
+        carico: s.series_pt?.carico || null,
+        recupero: s.series_pt?.recupero || null,
+        ripetizioni: s.series_pt?.ripetizioni || null,
+        note: s.series_pt?.note || null
+      }
+    })
+
+    const conflicts = await checkSovrascrittura(exercise.id, settimaneTarget, sessioniTarget)
+
+    if (conflicts.length > 0) {
+      // Salva i dati pending e mostra conferma
+      setPendingExerciseData({
+        exercise, settimaneTarget, sessioniTarget, valoriPT, conflicts
+      })
+      setConfirmSovrascrittura(true)
+    } else {
+      await eseguiCopiaPT(exercise.id, settimaneTarget, sessioniTarget, valoriPT, exercise.series.length)
+      fetchExercises()
+    }
+  }
+
+  async function eseguiCopiaPT(exerciseId, settimaneTarget, sessioniTarget, valoriPT, numSerie, soloNonEsistenti = false) {
+    for (const w of settimaneTarget) {
+      for (const s of sessioniTarget) {
+        if (w === settimana && s === sessione) continue
+
+        for (let i = 1; i <= numSerie; i++) {
+          // Cerca la serie esistente
+          const { data: existingSerie } = await supabase.from('series')
+            .select('*, series_pt(*)')
+            .eq('exercise_id', exerciseId)
+            .eq('settimana', w)
+            .eq('sessione', s)
+            .eq('numero', i)
+            .single()
+
+          if (existingSerie) {
+            const hasPT = existingSerie.series_pt && (
+              existingSerie.series_pt.carico ||
+              existingSerie.series_pt.ripetizioni ||
+              existingSerie.series_pt.recupero ||
+              existingSerie.series_pt.note
+            )
+
+            if (soloNonEsistenti && hasPT) continue // salta se già ha dati e siamo in modalità "non sovrascrivere"
+
+            const pt = valoriPT[i] || {}
+            await supabase.from('series_pt').upsert({
+              serie_id: existingSerie.id,
+              carico: pt.carico || null,
+              recupero: pt.recupero || null,
+              ripetizioni: pt.ripetizioni || null,
+              note: pt.note || null
+            }, { onConflict: 'serie_id' })
+          } else {
+            // Crea la serie se non esiste
+            const { data: nuovaSerie } = await supabase.from('series').insert({
+              exercise_id: exerciseId, settimana: w, sessione: s, numero: i
+            }).select().single()
+
+            const pt = valoriPT[i] || {}
+            if (pt.carico || pt.recupero || pt.ripetizioni || pt.note) {
+              await supabase.from('series_pt').insert({
+                serie_id: nuovaSerie.id,
+                carico: pt.carico || null,
+                recupero: pt.recupero || null,
+                ripetizioni: pt.ripetizioni || null,
+                note: pt.note || null
+              })
+            }
+          }
+        }
+      }
+    }
+  }
+
+  function resetForm() {
     setNuovoNome('')
     setNuovoNumSerie('3')
+    setNuovoCarico('')
+    setNuovoRecupero('')
+    setNuovoRip('')
+    setNuovoNote('')
     setShowAddEx(false)
-    fetchExercises()
   }
 
   async function deleteExercise(exerciseId) {
@@ -344,6 +510,48 @@ export default function HomeAtletaScreen() {
         </View>
       )}
 
+      {/* MODALE CONFERMA SOVRASCRITTURA */}
+      {confirmSovrascrittura && pendingExerciseData && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>⚠️ Dati già esistenti</Text>
+            <Text style={styles.modalText}>
+              Le seguenti sessioni hanno già valori PT inseriti:{'\n\n'}
+              {pendingExerciseData.conflicts.map(c =>
+                `• Sett. ${c.settimana} · Sess. ${c.sessione}`
+              ).join('\n')}{'\n\n'}
+              Cosa vuoi fare?
+            </Text>
+            <View style={styles.modalBtns3}>
+              <TouchableOpacity style={styles.modalCancel}
+                onPress={() => { setConfirmSovrascrittura(false); setPendingExerciseData(null) }}>
+                <Text style={styles.modalCancelText}>Annulla</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSkipBtn}
+                onPress={async () => {
+                  const { exercise, settimaneTarget, sessioniTarget, valoriPT } = pendingExerciseData
+                  await eseguiCopiaPT(exercise.id, settimaneTarget, sessioniTarget, valoriPT, exercise.series.length, true)
+                  setConfirmSovrascrittura(false)
+                  setPendingExerciseData(null)
+                  fetchExercises()
+                }}>
+                <Text style={styles.modalSkipBtnText}>Salta esistenti</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalOverwriteBtn}
+                onPress={async () => {
+                  const { exercise, settimaneTarget, sessioniTarget, valoriPT } = pendingExerciseData
+                  await eseguiCopiaPT(exercise.id, settimaneTarget, sessioniTarget, valoriPT, exercise.series.length, false)
+                  setConfirmSovrascrittura(false)
+                  setPendingExerciseData(null)
+                  fetchExercises()
+                }}>
+                <Text style={styles.modalOverwriteBtnText}>Sovrascrivi</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* SETTIMANE */}
@@ -437,6 +645,7 @@ export default function HomeAtletaScreen() {
               placeholderTextColor="#6B7280"
               autoFocus
             />
+
             <View style={styles.addRow}>
               <Text style={styles.addLabel}>Serie:</Text>
               <TextInput
@@ -449,6 +658,56 @@ export default function HomeAtletaScreen() {
               />
             </View>
 
+            {/* VALORI PT DA COPIARE */}
+            <View style={styles.ptValoriBox}>
+              <Text style={styles.ptValoriTitle}>📋 Valori PT da copiare (opzionale)</Text>
+              <Text style={styles.ptValoriHint}>Questi valori verranno applicati a tutte le serie nelle destinazioni selezionate</Text>
+              <View style={styles.ptValoriGrid}>
+                <View style={styles.ptValoreItem}>
+                  <Text style={styles.ptValoreLabel}>Carico</Text>
+                  <TextInput
+                    style={styles.ptValoreInput}
+                    value={nuovoCarico}
+                    onChangeText={setNuovoCarico}
+                    placeholder="es. 80kg"
+                    placeholderTextColor="#6B7280"
+                  />
+                </View>
+                <View style={styles.ptValoreItem}>
+                  <Text style={styles.ptValoreLabel}>Recupero (sec)</Text>
+                  <TextInput
+                    style={styles.ptValoreInput}
+                    value={nuovoRecupero}
+                    onChangeText={setNuovoRecupero}
+                    placeholder="es. 90"
+                    placeholderTextColor="#6B7280"
+                    keyboardType="number-pad"
+                  />
+                </View>
+                <View style={styles.ptValoreItem}>
+                  <Text style={styles.ptValoreLabel}>Ripetizioni</Text>
+                  <TextInput
+                    style={styles.ptValoreInput}
+                    value={nuovoRip}
+                    onChangeText={setNuovoRip}
+                    placeholder="es. 8-10"
+                    placeholderTextColor="#6B7280"
+                  />
+                </View>
+                <View style={styles.ptValoreItem}>
+                  <Text style={styles.ptValoreLabel}>Note</Text>
+                  <TextInput
+                    style={styles.ptValoreInput}
+                    value={nuovoNote}
+                    onChangeText={setNuovoNote}
+                    placeholder="es. Lento"
+                    placeholderTextColor="#6B7280"
+                  />
+                </View>
+              </View>
+            </View>
+
+            {/* SELEZIONE SETTIMANE */}
             <Text style={styles.addLabel}>Settimane:</Text>
             <View style={styles.selezioneGrid}>
               {tutteSettimane.map(w => (
@@ -471,6 +730,7 @@ export default function HomeAtletaScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* SELEZIONE SESSIONI */}
             <Text style={styles.addLabel}>Sessioni:</Text>
             <View style={styles.selezioneGrid}>
               {tutteSessioni.map(s => (
@@ -494,8 +754,7 @@ export default function HomeAtletaScreen() {
             </View>
 
             <View style={styles.addFormBtns}>
-              <TouchableOpacity style={styles.addFormCancel}
-                onPress={() => { setShowAddEx(false); setNuovoNome('') }}>
+              <TouchableOpacity style={styles.addFormCancel} onPress={resetForm}>
                 <Text style={styles.addFormCancelText}>Annulla</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.addFormConfirm} onPress={addExercise}>
@@ -529,6 +788,11 @@ export default function HomeAtletaScreen() {
               onToggleCompletato={() => toggleCompletamentoEsercizio(ex.id)}
               onAvviaTimer={avviaTimer}
               modificaPTSbloccata={modificaPTSbloccata}
+              onCopiaPT={(settimaneT, sessioniT) => copiaPTsuEsercizio(ex, settimaneT, sessioniT)}
+              tutteSettimane={tutteSettimane}
+              tutteSessioni={tutteSessioni}
+              settimanaCorrente={settimana}
+              sessioneCorrente={sessione}
             />
           ))
         )}
@@ -540,8 +804,11 @@ export default function HomeAtletaScreen() {
 }
 
 // ── EXERCISE CARD ─────────────────────────────
-function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, onDeleteSerie, onAddSerie, onSposta, completato, onToggleCompletato, onAvviaTimer, modificaPTSbloccata }) {
+function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, onDeleteSerie, onAddSerie, onSposta, completato, onToggleCompletato, onAvviaTimer, modificaPTSbloccata, onCopiaPT, tutteSettimane, tutteSessioni, settimanaCorrente, sessioneCorrente }) {
   const [open, setOpen] = useState(false)
+  const [showCopia, setShowCopia] = useState(false)
+  const [copiaSettimane, setCopiaSettimane] = useState(tutteSettimane)
+  const [copiaSessioni, setCopiaSessioni] = useState(tutteSessioni)
 
   return (
     <View style={[cardStyles.card, completato && cardStyles.cardCompleted]}>
@@ -549,14 +816,12 @@ function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, 
         <View style={cardStyles.frecce}>
           <TouchableOpacity
             style={[cardStyles.freccia, index === 0 && cardStyles.frecciaDisabled]}
-            onPress={() => onSposta(exercise.id, 'su')}
-            disabled={index === 0}>
+            onPress={() => onSposta(exercise.id, 'su')} disabled={index === 0}>
             <Text style={cardStyles.frecciaText}>▲</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[cardStyles.freccia, index === total - 1 && cardStyles.frecciaDisabled]}
-            onPress={() => onSposta(exercise.id, 'giu')}
-            disabled={index === total - 1}>
+            onPress={() => onSposta(exercise.id, 'giu')} disabled={index === total - 1}>
             <Text style={cardStyles.frecciaText}>▼</Text>
           </TouchableOpacity>
         </View>
@@ -600,9 +865,7 @@ function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, 
           {exercise.series.map((s, i) => (
             modificaPTSbloccata ? (
               <SeriePTEditabile
-                key={s.id}
-                serie={s}
-                index={i}
+                key={s.id} serie={s} index={i}
                 onUpdate={onUpdatePT}
                 onDelete={() => onDeleteSerie(s.id)}
                 onAvviaTimer={onAvviaTimer}
@@ -614,10 +877,8 @@ function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, 
                 <View style={{ flex: 1, alignItems: 'center' }}>
                   <Text style={cardStyles.tdPT}>{s.series_pt?.recupero || '–'}</Text>
                   {s.series_pt?.recupero ? (
-                    <TouchableOpacity
-                      style={cardStyles.timerBtn}
-                      onPress={() => onAvviaTimer(s.series_pt.recupero)}
-                      activeOpacity={0.7}>
+                    <TouchableOpacity style={cardStyles.timerBtn}
+                      onPress={() => onAvviaTimer(s.series_pt.recupero)} activeOpacity={0.7}>
                       <Text style={cardStyles.timerBtnText}>▶ {s.series_pt.recupero}s</Text>
                     </TouchableOpacity>
                   ) : null}
@@ -627,6 +888,77 @@ function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, 
               </View>
             )
           ))}
+
+          {/* BOTTONE COPIA PT */}
+          {modificaPTSbloccata && (
+            <TouchableOpacity
+              style={cardStyles.copiaBtn}
+              onPress={() => setShowCopia(!showCopia)}>
+              <Text style={cardStyles.copiaBtnText}>
+                {showCopia ? '✕ Chiudi' : '📋 Copia valori PT su altre sessioni'}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {/* FORM COPIA PT */}
+          {showCopia && modificaPTSbloccata && (
+            <View style={cardStyles.copiaForm}>
+              <Text style={cardStyles.copiaFormTitle}>Scegli destinazioni:</Text>
+
+              <Text style={cardStyles.copiaFormLabel}>Settimane:</Text>
+              <View style={cardStyles.selezioneGrid}>
+                {tutteSettimane.map(w => (
+                  <TouchableOpacity key={w}
+                    style={[cardStyles.selezioneChip, copiaSettimane.includes(w) && cardStyles.selezioneChipActive]}
+                    onPress={() => setCopiaSettimane(prev =>
+                      prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w])}>
+                    <Text style={[cardStyles.selezioneChipText, copiaSettimane.includes(w) && cardStyles.selezioneChipTextActive]}>
+                      S{w}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={cardStyles.selezioneActions}>
+                <TouchableOpacity onPress={() => setCopiaSettimane(tutteSettimane)}>
+                  <Text style={cardStyles.selezioneTutte}>Tutte</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setCopiaSettimane([])}>
+                  <Text style={cardStyles.selezioneNessuna}>Nessuna</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={cardStyles.copiaFormLabel}>Sessioni:</Text>
+              <View style={cardStyles.selezioneGrid}>
+                {tutteSessioni.map(s => (
+                  <TouchableOpacity key={s}
+                    style={[cardStyles.selezioneChip, copiaSessioni.includes(s) && cardStyles.selezioneChipActive]}
+                    onPress={() => setCopiaSessioni(prev =>
+                      prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}>
+                    <Text style={[cardStyles.selezioneChipText, copiaSessioni.includes(s) && cardStyles.selezioneChipTextActive]}>
+                      {s}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={cardStyles.selezioneActions}>
+                <TouchableOpacity onPress={() => setCopiaSessioni(tutteSessioni)}>
+                  <Text style={cardStyles.selezioneTutte}>Tutte</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setCopiaSessioni([sessioneCorrente])}>
+                  <Text style={cardStyles.selezioneNessuna}>Solo corrente</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={cardStyles.copiaConfirmBtn}
+                onPress={() => {
+                  onCopiaPT(copiaSettimane, copiaSessioni)
+                  setShowCopia(false)
+                }}>
+                <Text style={cardStyles.copiaConfirmBtnText}>📋 Copia valori PT</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* ESEGUITO ATLETA */}
           <Text style={[cardStyles.sectionTitle, { marginTop: 16 }]}>✅ Il tuo allenamento</Text>
@@ -640,20 +972,16 @@ function ExerciseCard({ exercise, index, total, onUpdate, onUpdatePT, onDelete, 
           </View>
           {exercise.series.map((s, i) => (
             <SerieRow
-              key={s.id}
-              serie={s}
-              index={i}
+              key={s.id} serie={s} index={i}
               onUpdate={onUpdate}
               onDelete={() => onDeleteSerie(s.id)}
               onAvviaTimer={onAvviaTimer}
             />
           ))}
 
-          {/* AGGIUNGI SERIE */}
           <TouchableOpacity style={cardStyles.addSerieBtn} onPress={onAddSerie}>
             <Text style={cardStyles.addSerieBtnText}>+ Aggiungi serie</Text>
           </TouchableOpacity>
-
         </View>
       )}
     </View>
@@ -681,10 +1009,7 @@ function SeriePTEditabile({ serie, index, onUpdate, onDelete, onAvviaTimer }) {
           onBlur={() => handleBlur('recupero', recupero)} placeholder="sec"
           placeholderTextColor="#6B7280" keyboardType="number-pad" />
         {recupero ? (
-          <TouchableOpacity
-            style={cardStyles.timerBtn}
-            onPress={() => onAvviaTimer(recupero)}
-            activeOpacity={0.7}>
+          <TouchableOpacity style={cardStyles.timerBtn} onPress={() => onAvviaTimer(recupero)} activeOpacity={0.7}>
             <Text style={cardStyles.timerBtnText}>▶ {recupero}s</Text>
           </TouchableOpacity>
         ) : null}
@@ -727,10 +1052,7 @@ function SerieRow({ serie, index, onUpdate, onDelete, onAvviaTimer }) {
           onBlur={() => handleBlur('recupero', recupero)} placeholder="sec"
           placeholderTextColor="#6B7280" keyboardType="number-pad" />
         {recuperoTimer ? (
-          <TouchableOpacity
-            style={cardStyles.timerBtn}
-            onPress={() => onAvviaTimer(recuperoTimer)}
-            activeOpacity={0.7}>
+          <TouchableOpacity style={cardStyles.timerBtn} onPress={() => onAvviaTimer(recuperoTimer)} activeOpacity={0.7}>
             <Text style={cardStyles.timerBtnText}>▶ {recuperoTimer}s</Text>
           </TouchableOpacity>
         ) : null}
@@ -813,9 +1135,7 @@ const styles = StyleSheet.create({
   completaBtnDone: { backgroundColor: '#52e89e22', borderColor: '#52e89e' },
   completaBtnText: { color: '#9CA3AF', fontWeight: '700', fontSize: 12 },
   completaBtnTextDone: { color: '#52e89e' },
-  addBtn: {
-    backgroundColor: '#e8ff47', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8
-  },
+  addBtn: { backgroundColor: '#e8ff47', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 },
   addBtnText: { color: '#000', fontWeight: '900', fontSize: 18 },
   addForm: {
     backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#2e2e3a',
@@ -829,6 +1149,19 @@ const styles = StyleSheet.create({
   addLabel: {
     fontSize: 12, color: '#9CA3AF', fontWeight: '700',
     textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4
+  },
+  ptValoriBox: {
+    backgroundColor: '#1a2a3a', borderWidth: 1, borderColor: '#2a4a6a',
+    borderRadius: 12, padding: 14, gap: 10
+  },
+  ptValoriTitle: { fontSize: 12, fontWeight: '800', color: '#7eb8ff', marginBottom: 2 },
+  ptValoriHint: { fontSize: 11, color: '#6B7280', lineHeight: 16 },
+  ptValoriGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  ptValoreItem: { width: '47%' },
+  ptValoreLabel: { fontSize: 11, color: '#7eb8ff', fontWeight: '600', marginBottom: 4 },
+  ptValoreInput: {
+    backgroundColor: '#26262e', borderWidth: 1, borderColor: '#2a4a6a',
+    borderRadius: 8, padding: 10, color: '#7eb8ff', fontSize: 13
   },
   selezioneGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   selezioneChip: {
@@ -863,18 +1196,29 @@ const styles = StyleSheet.create({
     backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#2e2e3a',
     borderRadius: 16, padding: 24, width: '100%'
   },
-  modalTitle: { fontSize: 20, fontWeight: '900', color: '#ff6b6b', marginBottom: 12 },
+  modalTitle: { fontSize: 18, fontWeight: '900', color: '#ff6b6b', marginBottom: 12 },
   modalText: { fontSize: 14, color: '#9CA3AF', lineHeight: 22, marginBottom: 20 },
   modalBtns: { flexDirection: 'row', gap: 12 },
+  modalBtns3: { flexDirection: 'row', gap: 8 },
   modalCancel: {
-    flex: 1, backgroundColor: '#26262e', borderRadius: 10, padding: 14, alignItems: 'center'
+    flex: 1, backgroundColor: '#26262e', borderRadius: 10, padding: 12, alignItems: 'center'
   },
-  modalCancelText: { color: '#9CA3AF', fontWeight: '700', fontSize: 15 },
+  modalCancelText: { color: '#9CA3AF', fontWeight: '700', fontSize: 13 },
   modalConfirm: {
     flex: 1, backgroundColor: '#ff3b3b22', borderWidth: 1,
-    borderColor: '#ff3b3b44', borderRadius: 10, padding: 14, alignItems: 'center'
+    borderColor: '#ff3b3b44', borderRadius: 10, padding: 12, alignItems: 'center'
   },
-  modalConfirmText: { color: '#ff6b6b', fontWeight: '800', fontSize: 15 },
+  modalConfirmText: { color: '#ff6b6b', fontWeight: '800', fontSize: 13 },
+  modalSkipBtn: {
+    flex: 1, backgroundColor: '#f59e0b22', borderWidth: 1,
+    borderColor: '#f59e0b44', borderRadius: 10, padding: 12, alignItems: 'center'
+  },
+  modalSkipBtnText: { color: '#f59e0b', fontWeight: '700', fontSize: 12 },
+  modalOverwriteBtn: {
+    flex: 1, backgroundColor: '#e8ff4722', borderWidth: 1,
+    borderColor: '#e8ff4744', borderRadius: 10, padding: 12, alignItems: 'center'
+  },
+  modalOverwriteBtnText: { color: '#e8ff47', fontWeight: '700', fontSize: 12 },
   timerOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center',
@@ -886,10 +1230,7 @@ const styles = StyleSheet.create({
   },
   timerLabel: { fontSize: 14, fontWeight: '700', color: '#9CA3AF', letterSpacing: 1 },
   timerSecondi: { fontSize: 72, fontWeight: '900', color: '#52e89e', lineHeight: 80 },
-  timerBar: {
-    width: '100%', height: 6, backgroundColor: '#2e2e3a',
-    borderRadius: 3, overflow: 'hidden'
-  },
+  timerBar: { width: '100%', height: 6, backgroundColor: '#2e2e3a', borderRadius: 3, overflow: 'hidden' },
   timerBarFill: { height: '100%', backgroundColor: '#52e89e', borderRadius: 3 },
   timerStop: {
     backgroundColor: '#ff3b3b22', borderWidth: 1, borderColor: '#ff3b3b44',
@@ -928,23 +1269,11 @@ const cardStyles = StyleSheet.create({
   deleteBtnText: { fontSize: 14 },
   chevron: { color: '#6B7280', fontSize: 12, padding: 4 },
   body: { padding: 16 },
-  sectionTitlePT: {
-    fontSize: 11, fontWeight: '700', color: '#7eb8ff',
-    letterSpacing: 1, marginBottom: 10
-  },
-  sectionTitle: {
-    fontSize: 11, fontWeight: '700', color: '#52e89e',
-    letterSpacing: 1, marginBottom: 10
-  },
-  tableHeader: {
-    flexDirection: 'row', marginBottom: 6, paddingBottom: 6,
-    borderBottomWidth: 1, borderBottomColor: '#2e2e3a'
-  },
+  sectionTitlePT: { fontSize: 11, fontWeight: '700', color: '#7eb8ff', letterSpacing: 1, marginBottom: 10 },
+  sectionTitle: { fontSize: 11, fontWeight: '700', color: '#52e89e', letterSpacing: 1, marginBottom: 10 },
+  tableHeader: { flexDirection: 'row', marginBottom: 6, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: '#2e2e3a' },
   th: { flex: 1, fontSize: 10, fontWeight: '700', color: '#6B7280', textAlign: 'center' },
-  tableRow: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#1e1e2422'
-  },
+  tableRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#1e1e2422' },
   td: { flex: 1, fontSize: 13, color: '#f0f0f0', textAlign: 'center' },
   tdPT: { flex: 1, fontSize: 13, color: '#7eb8ff', textAlign: 'center' },
   inputWrap: { flex: 1, paddingHorizontal: 2 },
@@ -966,10 +1295,37 @@ const cardStyles = StyleSheet.create({
   timerBtn: {
     backgroundColor: '#52e89e', borderRadius: 6,
     paddingVertical: 5, paddingHorizontal: 6,
-    alignItems: 'center', justifyContent: 'center',
-    marginTop: 2
+    alignItems: 'center', justifyContent: 'center', marginTop: 2
   },
-  timerBtnText: {
-    color: '#000', fontSize: 11, fontWeight: '900', letterSpacing: 0.5
+  timerBtnText: { color: '#000', fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
+  copiaBtn: {
+    marginTop: 10, padding: 10, borderRadius: 8,
+    borderWidth: 1, borderColor: '#7eb8ff44', backgroundColor: '#7eb8ff11', alignItems: 'center'
   },
+  copiaBtnText: { color: '#7eb8ff', fontSize: 12, fontWeight: '700' },
+  copiaForm: {
+    marginTop: 8, backgroundColor: '#1a2a3a', borderWidth: 1,
+    borderColor: '#2a4a6a', borderRadius: 12, padding: 14, gap: 10
+  },
+  copiaFormTitle: { fontSize: 13, fontWeight: '800', color: '#7eb8ff', marginBottom: 4 },
+  copiaFormLabel: {
+    fontSize: 11, color: '#7eb8ff', fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4
+  },
+  selezioneGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  selezioneChip: {
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8,
+    backgroundColor: '#26262e', borderWidth: 1, borderColor: '#2e2e3a'
+  },
+  selezioneChipActive: { backgroundColor: '#7eb8ff22', borderColor: '#7eb8ff' },
+  selezioneChipText: { fontSize: 11, fontWeight: '700', color: '#6B7280' },
+  selezioneChipTextActive: { color: '#7eb8ff' },
+  selezioneActions: { flexDirection: 'row', gap: 16, marginTop: 2 },
+  selezioneTutte: { fontSize: 11, color: '#52e89e', fontWeight: '600' },
+  selezioneNessuna: { fontSize: 11, color: '#ff6b6b', fontWeight: '600' },
+  copiaConfirmBtn: {
+    backgroundColor: '#7eb8ff', borderRadius: 10,
+    padding: 12, alignItems: 'center', marginTop: 4
+  },
+  copiaConfirmBtnText: { color: '#000', fontWeight: '800', fontSize: 13 },
 })

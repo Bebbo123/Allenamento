@@ -16,6 +16,14 @@ export default function HomePTScreen() {
   const [atletaProgressi, setAtletaProgressi] = useState(null)
   const [atletaStorico, setAtletaStorico] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [showCreaAtleta, setShowCreaAtleta] = useState(false)
+  const [nuovoNome, setNuovoNome] = useState('')
+  const [nuovoUsername, setNuovoUsername] = useState('')
+  const [nuovaPassword, setNuovaPassword] = useState('')
+  const [creaLoading, setCreaLoading] = useState(false)
+  const [creaMsg, setCreaMsg] = useState(null)
+  const [confirmDeleteAtleta, setConfirmDeleteAtleta] = useState(null)
+  const [deletingAtleta, setDeletingAtleta] = useState(false)
 
   useEffect(() => { fetchProfile() }, [])
   useEffect(() => { if (profile) { fetchAtleti(); fetchRichieste() } }, [profile])
@@ -29,7 +37,7 @@ export default function HomePTScreen() {
 
   async function fetchAtleti() {
     const { data } = await supabase.from('pt_atleta')
-      .select('*, atleta:atleta_id(id, nome, email, num_settimane, num_sessioni)')
+      .select('*, atleta:atleta_id(id, nome, email, num_settimane, num_sessioni, username, tipo_account)')
       .eq('pt_id', profile.id)
       .eq('stato', 'attivo')
     setAtleti(data || [])
@@ -51,6 +59,95 @@ export default function HomePTScreen() {
   async function rifiutaRichiesta(id) {
     await supabase.from('pt_atleta').update({ stato: 'rifiutato' }).eq('id', id)
     fetchRichieste()
+  }
+
+  async function eliminaAtleta(atleta) {
+    setDeletingAtleta(true)
+    const { error } = await supabase.rpc('delete_athlete_account', {
+      p_atleta_id: atleta.id,
+      p_pt_id: profile.id
+    })
+    if (error) {
+      alert('Errore: ' + error.message)
+    } else {
+      fetchAtleti()
+    }
+    setConfirmDeleteAtleta(null)
+    setDeletingAtleta(false)
+  }
+
+  async function creaAtleta() {
+    if (!nuovoNome.trim() || !nuovoUsername.trim() || !nuovaPassword.trim()) {
+      setCreaMsg({ tipo: 'errore', testo: 'Compila tutti i campi' })
+      return
+    }
+    if (nuovaPassword.length < 6) {
+      setCreaMsg({ tipo: 'errore', testo: 'Password minimo 6 caratteri' })
+      return
+    }
+
+    setCreaLoading(true)
+    setCreaMsg(null)
+
+    const username = nuovoUsername.trim().toLowerCase()
+
+    const { data: existingList } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('username', username)
+
+    if (existingList && existingList.length > 0) {
+      setCreaMsg({ tipo: 'errore', testo: 'Username già in uso, scegline un altro' })
+      setCreaLoading(false)
+      return
+    }
+
+    const fakeEmail = `${username}@trainer-test.it`
+
+    const { data, error } = await supabase.auth.signUp({
+      email: fakeEmail,
+      password: nuovaPassword,
+      options: {
+        data: {
+          nome: nuovoNome.trim(),
+          ruolo: 'atleta',
+          username: username,
+          tipo_account: 'username',
+          pt_creatore: profile.id
+        }
+      }
+    })
+
+    if (error) {
+      setCreaMsg({ tipo: 'errore', testo: 'Errore: ' + error.message })
+      setCreaLoading(false)
+      return
+    }
+
+    if (!data.user) {
+      setCreaMsg({ tipo: 'errore', testo: 'Errore nella creazione account' })
+      setCreaLoading(false)
+      return
+    }
+
+    await supabase.from('pt_atleta').insert({
+      pt_id: profile.id,
+      atleta_id: data.user.id,
+      stato: 'attivo'
+    })
+
+    await supabase.from('schede').insert({
+      atleta_id: data.user.id,
+      nome: 'Scheda 1',
+      stato: 'attiva'
+    })
+
+    setCreaMsg({ tipo: 'ok', testo: `✓ Atleta "${nuovoNome.trim()}" creato! Username: @${username}` })
+    setNuovoNome('')
+    setNuovoUsername('')
+    setNuovaPassword('')
+    setCreaLoading(false)
+    fetchAtleti()
   }
 
   async function handleLogout() {
@@ -95,13 +192,48 @@ export default function HomePTScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* MODALE ELIMINA ATLETA */}
+      {confirmDeleteAtleta && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>🗑 Elimina Atleta</Text>
+            <Text style={styles.modalText}>
+              Vuoi eliminare definitivamente{' '}
+              <Text style={{ color: '#f0f0f0', fontWeight: '700' }}>
+                {confirmDeleteAtleta.nome}
+              </Text>?{'\n\n'}
+              Verranno eliminati account, schede, esercizi e tutti i dati.
+              Questa azione è irreversibile.
+            </Text>
+            <View style={styles.modalBtns}>
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => setConfirmDeleteAtleta(null)}>
+                <Text style={styles.modalCancelText}>Annulla</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalConfirm, deletingAtleta && { opacity: 0.6 }]}
+                onPress={() => eliminaAtleta(confirmDeleteAtleta)}
+                disabled={deletingAtleta}>
+                <Text style={styles.modalConfirmText}>
+                  {deletingAtleta ? 'Eliminando...' : '🗑 Elimina'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+
+        {/* CODICE PT */}
         <View style={styles.codiceBox}>
           <Text style={styles.codiceLabel}>Il tuo Codice PT</Text>
           <Text style={styles.codice}>{profile?.codice_pt}</Text>
           <Text style={styles.codiceHint}>Condividilo con i tuoi atleti per collegarti</Text>
         </View>
 
+        {/* RICHIESTE IN ATTESA */}
         {richieste.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>🔔 Richieste in attesa ({richieste.length})</Text>
@@ -124,6 +256,78 @@ export default function HomePTScreen() {
           </View>
         )}
 
+        {/* CREA ATLETA */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>➕ Crea Atleta</Text>
+            <TouchableOpacity
+              style={styles.toggleCreaBtn}
+              onPress={() => { setShowCreaAtleta(!showCreaAtleta); setCreaMsg(null) }}>
+              <Text style={styles.toggleCreaBtnText}>
+                {showCreaAtleta ? '✕ Chiudi' : '+ Nuovo'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {showCreaAtleta && (
+            <View style={styles.creaForm}>
+              <Text style={styles.creaFormDesc}>
+                Crea un account per il tuo atleta. Accederà con username e password, senza bisogno di email. Sarà collegato a te in modo permanente.
+              </Text>
+
+              <Text style={styles.creaLabel}>Nome completo *</Text>
+              <TextInput
+                style={styles.creaInput}
+                value={nuovoNome}
+                onChangeText={setNuovoNome}
+                placeholder="es. Mario Rossi"
+                placeholderTextColor="#6B7280"
+              />
+
+              <Text style={styles.creaLabel}>Username *</Text>
+              <View style={styles.usernameRow}>
+                <Text style={styles.usernameAt}>@</Text>
+                <TextInput
+                  style={[styles.creaInput, { flex: 1 }]}
+                  value={nuovoUsername}
+                  onChangeText={v => setNuovoUsername(v.toLowerCase().replace(/\s/g, '_'))}
+                  placeholder="es. mario_rossi"
+                  placeholderTextColor="#6B7280"
+                  autoCapitalize="none"
+                />
+              </View>
+
+              <Text style={styles.creaLabel}>Password *</Text>
+              <TextInput
+                style={styles.creaInput}
+                value={nuovaPassword}
+                onChangeText={setNuovaPassword}
+                placeholder="Minimo 6 caratteri"
+                placeholderTextColor="#6B7280"
+                secureTextEntry
+              />
+
+              {creaMsg && (
+                <View style={[styles.msgBox, creaMsg.tipo === 'ok' ? styles.msgOk : styles.msgErrore]}>
+                  <Text style={[styles.msgText, creaMsg.tipo === 'ok' ? styles.msgTextOk : styles.msgTextErrore]}>
+                    {creaMsg.testo}
+                  </Text>
+                </View>
+              )}
+
+              <TouchableOpacity
+                style={[styles.creaBtn, creaLoading && styles.creaBtnDisabled]}
+                onPress={creaAtleta}
+                disabled={creaLoading}>
+                <Text style={styles.creaBtnText}>
+                  {creaLoading ? 'Creazione in corso...' : '✓ Crea Atleta'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {/* ATLETI COLLEGATI */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>👥 I tuoi Atleti ({atleti.length})</Text>
           {atleti.length === 0 ? (
@@ -131,24 +335,46 @@ export default function HomePTScreen() {
               <Text style={styles.emptyIcon}>👤</Text>
               <Text style={styles.emptyTitle}>Nessun atleta collegato</Text>
               <Text style={styles.emptyText}>
-                Condividi il codice <Text style={{ color: '#e8ff47' }}>{profile?.codice_pt}</Text> con i tuoi atleti
+                Condividi il codice <Text style={{ color: '#e8ff47' }}>{profile?.codice_pt}</Text> oppure crea un atleta qui sopra
               </Text>
             </View>
           ) : (
             atleti.map(a => (
               <View key={a.id} style={styles.atletaCard}>
-                <TouchableOpacity style={styles.atletaCardMain} onPress={() => setAtletaSelezionato(a.atleta)}>
+                <TouchableOpacity
+                  style={styles.atletaCardMain}
+                  onPress={() => setAtletaSelezionato(a.atleta)}>
                   <View style={styles.atletaAvatar}>
-                    <Text style={styles.atletaAvatarText}>{a.atleta.nome.charAt(0).toUpperCase()}</Text>
+                    <Text style={styles.atletaAvatarText}>
+                      {a.atleta.nome.charAt(0).toUpperCase()}
+                    </Text>
                   </View>
                   <View style={styles.atletaInfo}>
-                    <Text style={styles.atletaNome}>{a.atleta.nome}</Text>
-                    <Text style={styles.atletaEmail}>{a.atleta.email}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.atletaNome}>{a.atleta.nome}</Text>
+                      {a.atleta.tipo_account === 'username' && (
+                        <View style={styles.usernameTag}>
+                          <Text style={styles.usernameTagText}>👤</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.atletaEmail}>
+                      {a.atleta.tipo_account === 'username'
+                        ? `@${a.atleta.username}`
+                        : a.atleta.email}
+                    </Text>
                     <Text style={styles.atletaMeta}>
                       {a.atleta.num_settimane || 8} sett. · {a.atleta.num_sessioni || 7} sess.
                     </Text>
                   </View>
                 </TouchableOpacity>
+                {a.atleta.tipo_account === 'username' && (
+                  <TouchableOpacity
+                    style={styles.deleteAtletaBtn}
+                    onPress={() => setConfirmDeleteAtleta(a.atleta)}>
+                    <Text style={styles.deleteAtletaBtnText}>🗑</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity style={styles.iconActionBtn} onPress={() => setAtletaStorico(a.atleta)}>
                   <Text style={styles.iconActionText}>📚</Text>
                 </TouchableOpacity>
@@ -179,12 +405,18 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
   const [showAddEx, setShowAddEx] = useState(false)
   const [nuovoNome, setNuovoNome] = useState('')
   const [nuovoNumSerie, setNuovoNumSerie] = useState('3')
+  const [nuovoCarico, setNuovoCarico] = useState('')
+  const [nuovoRecupero, setNuovoRecupero] = useState('')
+  const [nuovoRip, setNuovoRip] = useState('')
+  const [nuovoNote, setNuovoNote] = useState('')
   const [settimaneSelezionate, setSettimaneSelezionate] = useState([])
   const [sessioniSelezionate, setSessioniSelezionate] = useState([])
   const [confirmDelete, setConfirmDelete] = useState(null)
+  const [confirmSovrascrittura, setConfirmSovrascrittura] = useState(false)
+  const [pendingExerciseData, setPendingExerciseData] = useState(null)
   const [completamenti, setCompletamenti] = useState({})
   const [sessioniCompletate, setSessioniCompletate] = useState({})
-  const [timerAttivo, setTimerAttivo] = useState(null)
+  const [timerAttivo, setTimerAttivo] = useState(false)
   const [timerSecondi, setTimerSecondi] = useState(0)
   const timerRef = useRef(null)
   const [numSettimane, setNumSettimaneState] = useState(atleta.num_settimane || 8)
@@ -294,10 +526,8 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
   async function archiviaScheda() {
     if (!schedaAttiva) return
     setArchiviando(true)
-
     await supabase.from('schede').update({
-      stato: 'archiviata',
-      archiviata_at: new Date().toISOString()
+      stato: 'archiviata', archiviata_at: new Date().toISOString()
     }).eq('id', schedaAttiva.id)
 
     const { data: archiviate } = await supabase.from('schede')
@@ -326,6 +556,28 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
     fetchExercises()
   }
 
+  async function checkSovrascrittura(exId, settimaneTarget, sessioniTarget) {
+    const conflicts = []
+    for (const w of settimaneTarget) {
+      for (const s of sessioniTarget) {
+        if (w === settimana && s === sessione) continue
+        const { data } = await supabase.from('series')
+          .select('*, series_pt(*)')
+          .eq('exercise_id', exId)
+          .eq('settimana', w)
+          .eq('sessione', s)
+        if (data && data.length > 0) {
+          const hasPT = data.some(d => d.series_pt && (
+            d.series_pt.carico || d.series_pt.ripetizioni ||
+            d.series_pt.recupero || d.series_pt.note
+          ))
+          if (hasPT) conflicts.push({ settimana: w, sessione: s })
+        }
+      }
+    }
+    return conflicts
+  }
+
   async function addExercise() {
     if (!nuovoNome.trim()) return
     const numSerie = parseInt(nuovoNumSerie) || 3
@@ -337,17 +589,120 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
       scheda_id: schedaAttiva?.id
     }).select().single()
 
+    for (let i = 1; i <= numSerie; i++) {
+      const { data: serie } = await supabase.from('series').insert({
+        exercise_id: ex.id, settimana, sessione, numero: i
+      }).select().single()
+
+      if (nuovoCarico || nuovoRecupero || nuovoRip || nuovoNote) {
+        await supabase.from('series_pt').insert({
+          serie_id: serie.id,
+          carico: nuovoCarico || null,
+          recupero: nuovoRecupero || null,
+          ripetizioni: nuovoRip || null,
+          note: nuovoNote || null
+        })
+      }
+    }
+
+    const altreDestinazioni = []
     for (const w of settimaneSelezionate) {
       for (const s of sessioniSelezionate) {
-        for (let i = 1; i <= numSerie; i++) {
-          await supabase.from('series').insert({
-            exercise_id: ex.id, settimana: w, sessione: s, numero: i
+        if (w === settimana && s === sessione) continue
+        altreDestinazioni.push({ w, s })
+      }
+    }
+
+    for (const { w, s } of altreDestinazioni) {
+      for (let i = 1; i <= numSerie; i++) {
+        const { data: serie } = await supabase.from('series').insert({
+          exercise_id: ex.id, settimana: w, sessione: s, numero: i
+        }).select().single()
+
+        if (nuovoCarico || nuovoRecupero || nuovoRip || nuovoNote) {
+          await supabase.from('series_pt').insert({
+            serie_id: serie.id,
+            carico: nuovoCarico || null,
+            recupero: nuovoRecupero || null,
+            ripetizioni: nuovoRip || null,
+            note: nuovoNote || null
           })
         }
       }
     }
+
+    resetForm()
+    fetchExercises()
+  }
+
+  async function copiaPTsuEsercizio(exercise, settimaneTarget, sessioniTarget) {
+    const valoriPT = {}
+    exercise.series.forEach((s, i) => {
+      valoriPT[i + 1] = {
+        carico: s.series_pt?.carico || null,
+        recupero: s.series_pt?.recupero || null,
+        ripetizioni: s.series_pt?.ripetizioni || null,
+        note: s.series_pt?.note || null
+      }
+    })
+
+    const conflicts = await checkSovrascrittura(exercise.id, settimaneTarget, sessioniTarget)
+
+    if (conflicts.length > 0) {
+      setPendingExerciseData({ exercise, settimaneTarget, sessioniTarget, valoriPT, conflicts })
+      setConfirmSovrascrittura(true)
+    } else {
+      await eseguiCopiaPT(exercise.id, settimaneTarget, sessioniTarget, valoriPT, exercise.series.length, false)
+      fetchExercises()
+    }
+  }
+
+  async function eseguiCopiaPT(exerciseId, settimaneTarget, sessioniTarget, valoriPT, numSerie, soloNonEsistenti) {
+    for (const w of settimaneTarget) {
+      for (const s of sessioniTarget) {
+        if (w === settimana && s === sessione) continue
+        for (let i = 1; i <= numSerie; i++) {
+          const { data: existingSerie } = await supabase.from('series')
+            .select('*, series_pt(*)')
+            .eq('exercise_id', exerciseId)
+            .eq('settimana', w).eq('sessione', s).eq('numero', i)
+            .single()
+
+          if (existingSerie) {
+            const hasPT = existingSerie.series_pt && (
+              existingSerie.series_pt.carico || existingSerie.series_pt.ripetizioni ||
+              existingSerie.series_pt.recupero || existingSerie.series_pt.note
+            )
+            if (soloNonEsistenti && hasPT) continue
+            const pt = valoriPT[i] || {}
+            await supabase.from('series_pt').upsert({
+              serie_id: existingSerie.id,
+              carico: pt.carico || null, recupero: pt.recupero || null,
+              ripetizioni: pt.ripetizioni || null, note: pt.note || null
+            }, { onConflict: 'serie_id' })
+          } else {
+            const { data: nuovaSerie } = await supabase.from('series').insert({
+              exercise_id: exerciseId, settimana: w, sessione: s, numero: i
+            }).select().single()
+            const pt = valoriPT[i] || {}
+            if (pt.carico || pt.recupero || pt.ripetizioni || pt.note) {
+              await supabase.from('series_pt').insert({
+                serie_id: nuovaSerie.id,
+                carico: pt.carico || null, recupero: pt.recupero || null,
+                ripetizioni: pt.ripetizioni || null, note: pt.note || null
+              })
+            }
+          }
+        }
+      }
+    }
+  }
+
+  function resetForm() {
     setNuovoNome(''); setNuovoNumSerie('3')
-    setShowAddEx(false); fetchExercises()
+    setNuovoCarico(''); setNuovoRecupero('')
+    setNuovoRip(''); setNuovoNote('')
+    setShowAddEx(false)
   }
 
   async function deleteExercise(exerciseId) {
@@ -402,11 +757,9 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
   }
 
   const currentDow = sessionDow[`${settimana}_${sessione}`]
-  const sessioneCompletata = sessioniCompletate[sessione]
   const tutteSettimane = Array.from({length: numSettimane}, (_, i) => i + 1)
   const tutteSessioni = Array.from({length: numSessioni}, (_, i) => i + 1)
 
-  // Vista tabella
   if (vistaTabella) {
     return (
       <VistaTabella
@@ -448,7 +801,7 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
       </View>
 
       {/* TIMER OVERLAY */}
-      {timerAttivo !== null && timerSecondi > 0 && (
+      {timerAttivo && timerSecondi > 0 && (
         <View style={styles.timerOverlay}>
           <View style={styles.timerCard}>
             <Text style={styles.timerLabel}>⏱ Recupero</Text>
@@ -463,7 +816,7 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
         </View>
       )}
 
-      {/* MODALE ELIMINA */}
+      {/* MODALE ELIMINA ESERCIZIO */}
       {confirmDelete && (
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
@@ -490,15 +843,11 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
             <Text style={styles.modalTitle}>📦 Archivia Scheda</Text>
             <Text style={styles.modalText}>
               Stai archiviando la scheda di <Text style={{ color: '#f0f0f0', fontWeight: '700' }}>{atleta.nome}</Text>.{'\n\n'}
-              Inserisci il nome della nuova scheda (opzionale):
+              Nome della nuova scheda (opzionale):
             </Text>
-            <TextInput
-              style={styles.nomeInput}
-              value={nomeNuovaScheda}
-              onChangeText={setNomeNuovaScheda}
-              placeholder="Es. Scheda Forza 2"
-              placeholderTextColor="#6B7280"
-            />
+            <TextInput style={styles.nomeInput} value={nomeNuovaScheda}
+              onChangeText={setNomeNuovaScheda} placeholder="Es. Scheda Forza 2"
+              placeholderTextColor="#6B7280" />
             <View style={styles.modalBtns}>
               <TouchableOpacity style={styles.modalCancel}
                 onPress={() => { setShowConfirmArchivia(false); setNomeNuovaScheda('') }}>
@@ -510,6 +859,44 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
                 <Text style={styles.modalArchiviaBtnText}>
                   {archiviando ? 'Archiviando...' : '📦 Archivia'}
                 </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* MODALE SOVRASCRITTURA */}
+      {confirmSovrascrittura && pendingExerciseData && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>⚠️ Dati già esistenti</Text>
+            <Text style={styles.modalText}>
+              Le seguenti sessioni hanno già valori PT:{'\n\n'}
+              {pendingExerciseData.conflicts.map(c =>
+                `• Sett. ${c.settimana} · Sess. ${c.sessione}`
+              ).join('\n')}{'\n\n'}
+              Cosa vuoi fare?
+            </Text>
+            <View style={styles.modalBtns3}>
+              <TouchableOpacity style={styles.modalCancel}
+                onPress={() => { setConfirmSovrascrittura(false); setPendingExerciseData(null) }}>
+                <Text style={styles.modalCancelText}>Annulla</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSkipBtn}
+                onPress={async () => {
+                  const { exercise, settimaneTarget, sessioniTarget, valoriPT } = pendingExerciseData
+                  await eseguiCopiaPT(exercise.id, settimaneTarget, sessioniTarget, valoriPT, exercise.series.length, true)
+                  setConfirmSovrascrittura(false); setPendingExerciseData(null); fetchExercises()
+                }}>
+                <Text style={styles.modalSkipBtnText}>Salta</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalOverwriteBtn}
+                onPress={async () => {
+                  const { exercise, settimaneTarget, sessioniTarget, valoriPT } = pendingExerciseData
+                  await eseguiCopiaPT(exercise.id, settimaneTarget, sessioniTarget, valoriPT, exercise.series.length, false)
+                  setConfirmSovrascrittura(false); setPendingExerciseData(null); fetchExercises()
+                }}>
+                <Text style={styles.modalOverwriteBtnText}>Sovrascrivi</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -552,22 +939,18 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
               <TouchableOpacity style={styles.salvaConfigBtn} onPress={salvaConfigScheda}>
                 <Text style={styles.salvaConfigBtnText}>✓ Salva</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.archiviaConfigBtn}
-                onPress={() => setShowConfirmArchivia(true)}>
-                <Text style={styles.archiviaConfigBtnText}>📦 Archivia scheda</Text>
+              <TouchableOpacity style={styles.archiviaConfigBtn} onPress={() => setShowConfirmArchivia(true)}>
+                <Text style={styles.archiviaConfigBtnText}>📦 Archivia</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
 
-        {/* SCHEDA ATTIVA INFO */}
+        {/* SCHEDA ATTIVA */}
         {schedaAttiva && (
           <View style={styles.schedaAttivaBar}>
             <Text style={styles.schedaAttivaBarText}>📋 {schedaAttiva.nome}</Text>
-            <Text style={styles.schedaAttivaBarSub}>
-              {numSettimane} sett. · {numSessioni} sess.
-            </Text>
+            <Text style={styles.schedaAttivaBarSub}>{numSettimane} sett. · {numSessioni} sess.</Text>
           </View>
         )}
 
@@ -632,6 +1015,34 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
                 keyboardType="number-pad" placeholder="3" placeholderTextColor="#6B7280" />
             </View>
 
+            <View style={styles.ptValoriBox}>
+              <Text style={styles.ptValoriTitle}>📋 Valori PT da copiare (opzionale)</Text>
+              <Text style={styles.ptValoriHint}>Applicati a tutte le serie nelle destinazioni selezionate</Text>
+              <View style={styles.ptValoriGrid}>
+                <View style={styles.ptValoreItem}>
+                  <Text style={styles.ptValoreLabel}>Carico</Text>
+                  <TextInput style={styles.ptValoreInput} value={nuovoCarico}
+                    onChangeText={setNuovoCarico} placeholder="es. 80kg" placeholderTextColor="#6B7280" />
+                </View>
+                <View style={styles.ptValoreItem}>
+                  <Text style={styles.ptValoreLabel}>Recupero (sec)</Text>
+                  <TextInput style={styles.ptValoreInput} value={nuovoRecupero}
+                    onChangeText={setNuovoRecupero} placeholder="es. 90"
+                    placeholderTextColor="#6B7280" keyboardType="number-pad" />
+                </View>
+                <View style={styles.ptValoreItem}>
+                  <Text style={styles.ptValoreLabel}>Ripetizioni</Text>
+                  <TextInput style={styles.ptValoreInput} value={nuovoRip}
+                    onChangeText={setNuovoRip} placeholder="es. 8-10" placeholderTextColor="#6B7280" />
+                </View>
+                <View style={styles.ptValoreItem}>
+                  <Text style={styles.ptValoreLabel}>Note</Text>
+                  <TextInput style={styles.ptValoreInput} value={nuovoNote}
+                    onChangeText={setNuovoNote} placeholder="es. Lento" placeholderTextColor="#6B7280" />
+                </View>
+              </View>
+            </View>
+
             <Text style={styles.addLabel}>Settimane:</Text>
             <View style={styles.selezioneGrid}>
               {tutteSettimane.map(w => (
@@ -677,8 +1088,7 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
             </View>
 
             <View style={styles.addFormBtns}>
-              <TouchableOpacity style={styles.addFormCancel}
-                onPress={() => { setShowAddEx(false); setNuovoNome('') }}>
+              <TouchableOpacity style={styles.addFormCancel} onPress={resetForm}>
                 <Text style={styles.addFormCancelText}>Annulla</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.addFormConfirm} onPress={addExercise}>
@@ -718,6 +1128,10 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
               onSposta={spostaEsercizio}
               completato={!!completamenti[ex.id]}
               onAvviaTimer={avviaTimer}
+              onCopiaPT={(settimaneT, sessioniT) => copiaPTsuEsercizio(ex, settimaneT, sessioniT)}
+              tutteSettimane={tutteSettimane}
+              tutteSessioni={tutteSessioni}
+              sessioneCorrente={sessione}
             />
           ))
         )}
@@ -729,8 +1143,11 @@ function SchedaAtletaPT({ atleta, ptId, onBack, onProgressi, onStorico }) {
 }
 
 // ── EXERCISE CARD PT ───────────────────────────
-function ExercisePTCard({ exercise, index, total, onUpdatePT, onAddSerie, onDeleteSerie, onDelete, onSposta, completato, onAvviaTimer }) {
+function ExercisePTCard({ exercise, index, total, onUpdatePT, onAddSerie, onDeleteSerie, onDelete, onSposta, completato, onAvviaTimer, onCopiaPT, tutteSettimane, tutteSessioni, sessioneCorrente }) {
   const [open, setOpen] = useState(true)
+  const [showCopia, setShowCopia] = useState(false)
+  const [copiaSettimane, setCopiaSettimane] = useState(tutteSettimane)
+  const [copiaSessioni, setCopiaSessioni] = useState(tutteSessioni)
 
   return (
     <View style={[cardStyles.card, completato && cardStyles.cardCompleted]}>
@@ -783,6 +1200,64 @@ function ExercisePTCard({ exercise, index, total, onUpdatePT, onAddSerie, onDele
             <Text style={cardStyles.addSerieBtnText}>+ Aggiungi serie</Text>
           </TouchableOpacity>
 
+          <TouchableOpacity style={cardStyles.copiaBtn} onPress={() => setShowCopia(!showCopia)}>
+            <Text style={cardStyles.copiaBtnText}>
+              {showCopia ? '✕ Chiudi' : '📋 Copia valori PT su altre sessioni'}
+            </Text>
+          </TouchableOpacity>
+
+          {showCopia && (
+            <View style={cardStyles.copiaForm}>
+              <Text style={cardStyles.copiaFormTitle}>Scegli destinazioni:</Text>
+              <Text style={cardStyles.copiaFormLabel}>Settimane:</Text>
+              <View style={cardStyles.selezioneGrid}>
+                {tutteSettimane.map(w => (
+                  <TouchableOpacity key={w}
+                    style={[cardStyles.selezioneChip, copiaSettimane.includes(w) && cardStyles.selezioneChipActive]}
+                    onPress={() => setCopiaSettimane(prev =>
+                      prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w])}>
+                    <Text style={[cardStyles.selezioneChipText, copiaSettimane.includes(w) && cardStyles.selezioneChipTextActive]}>
+                      S{w}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={cardStyles.selezioneActions}>
+                <TouchableOpacity onPress={() => setCopiaSettimane(tutteSettimane)}>
+                  <Text style={cardStyles.selezioneTutte}>Tutte</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setCopiaSettimane([])}>
+                  <Text style={cardStyles.selezioneNessuna}>Nessuna</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={cardStyles.copiaFormLabel}>Sessioni:</Text>
+              <View style={cardStyles.selezioneGrid}>
+                {tutteSessioni.map(s => (
+                  <TouchableOpacity key={s}
+                    style={[cardStyles.selezioneChip, copiaSessioni.includes(s) && cardStyles.selezioneChipActive]}
+                    onPress={() => setCopiaSessioni(prev =>
+                      prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}>
+                    <Text style={[cardStyles.selezioneChipText, copiaSessioni.includes(s) && cardStyles.selezioneChipTextActive]}>
+                      {s}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={cardStyles.selezioneActions}>
+                <TouchableOpacity onPress={() => setCopiaSessioni(tutteSessioni)}>
+                  <Text style={cardStyles.selezioneTutte}>Tutte</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setCopiaSessioni([sessioneCorrente])}>
+                  <Text style={cardStyles.selezioneNessuna}>Solo corrente</Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity style={cardStyles.copiaConfirmBtn}
+                onPress={() => { onCopiaPT(copiaSettimane, copiaSessioni); setShowCopia(false) }}>
+                <Text style={cardStyles.copiaConfirmBtnText}>📋 Copia valori PT</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           <Text style={[cardStyles.sectionTitle, { marginTop: 16 }]}>✅ Eseguito Atleta</Text>
           <View style={cardStyles.tableHeader}>
             <Text style={[cardStyles.th, { width: 30 }]}>#</Text>
@@ -822,13 +1297,13 @@ function SeriePTRow({ serie, index, onUpdate, onDelete, onAvviaTimer }) {
         <TextInput style={cardStyles.inputPT} value={carico} onChangeText={setCarico}
           onBlur={() => handleBlur('carico', carico)} placeholder="–" placeholderTextColor="#6B7280" />
       </View>
-      <View style={[cardStyles.inputWrap, { flexDirection: 'row', alignItems: 'center', gap: 2 }]}>
-        <TextInput style={[cardStyles.inputPT, { flex: 1 }]} value={recupero} onChangeText={setRecupero}
+      <View style={[cardStyles.inputWrap, { flexDirection: 'column', gap: 4 }]}>
+        <TextInput style={cardStyles.inputPT} value={recupero} onChangeText={setRecupero}
           onBlur={() => handleBlur('recupero', recupero)} placeholder="sec"
           placeholderTextColor="#6B7280" keyboardType="number-pad" />
         {recupero ? (
-          <TouchableOpacity onPress={() => onAvviaTimer(recupero)}>
-            <Text style={{ fontSize: 14, color: '#52e89e' }}>▶</Text>
+          <TouchableOpacity style={cardStyles.timerBtn} onPress={() => onAvviaTimer(recupero)} activeOpacity={0.7}>
+            <Text style={cardStyles.timerBtnText}>▶ {recupero}s</Text>
           </TouchableOpacity>
         ) : null}
       </View>
@@ -874,7 +1349,34 @@ const styles = StyleSheet.create({
   codice: { fontSize: 36, fontWeight: '900', color: '#e8ff47', letterSpacing: 4, marginBottom: 8 },
   codiceHint: { fontSize: 12, color: '#6B7280', textAlign: 'center' },
   section: { paddingHorizontal: 20, marginBottom: 16 },
-  sectionTitle: { fontSize: 15, fontWeight: '800', color: '#f0f0f0', marginBottom: 12 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  sectionTitle: { fontSize: 15, fontWeight: '800', color: '#f0f0f0' },
+  toggleCreaBtn: {
+    backgroundColor: '#e8ff4722', borderWidth: 1, borderColor: '#e8ff4744',
+    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6
+  },
+  toggleCreaBtnText: { color: '#e8ff47', fontWeight: '700', fontSize: 13 },
+  creaForm: {
+    backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#2e2e3a',
+    borderRadius: 14, padding: 16, gap: 12
+  },
+  creaFormDesc: { fontSize: 13, color: '#9CA3AF', lineHeight: 20 },
+  creaLabel: { fontSize: 12, fontWeight: '700', color: '#D1D5DB', textTransform: 'uppercase', letterSpacing: 0.5 },
+  creaInput: {
+    backgroundColor: '#26262e', borderWidth: 1, borderColor: '#2e2e3a',
+    borderRadius: 10, padding: 14, color: '#f0f0f0', fontSize: 15
+  },
+  usernameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  usernameAt: { fontSize: 20, fontWeight: '900', color: '#e8ff47' },
+  msgBox: { borderRadius: 10, padding: 12, borderWidth: 1 },
+  msgOk: { backgroundColor: '#52e89e22', borderColor: '#52e89e44' },
+  msgErrore: { backgroundColor: '#ff3b3b22', borderColor: '#ff3b3b44' },
+  msgText: { fontSize: 13, fontWeight: '600' },
+  msgTextOk: { color: '#52e89e' },
+  msgTextErrore: { color: '#ff6b6b' },
+  creaBtn: { backgroundColor: '#e8ff47', borderRadius: 12, padding: 14, alignItems: 'center' },
+  creaBtnDisabled: { opacity: 0.6 },
+  creaBtnText: { color: '#000', fontWeight: '800', fontSize: 15 },
   richiestaCard: {
     backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#2e2e3a',
     borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', marginBottom: 10
@@ -904,6 +1406,17 @@ const styles = StyleSheet.create({
   atletaNome: { fontSize: 15, fontWeight: '700', color: '#f0f0f0' },
   atletaEmail: { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
   atletaMeta: { fontSize: 11, color: '#6B7280', marginTop: 3 },
+  usernameTag: {
+    backgroundColor: '#f59e0b22', borderRadius: 4,
+    paddingHorizontal: 6, paddingVertical: 2
+  },
+  usernameTagText: { fontSize: 10 },
+  deleteAtletaBtn: {
+    borderLeftWidth: 1, borderLeftColor: '#2e2e3a',
+    paddingHorizontal: 12, paddingVertical: 16,
+    justifyContent: 'center', backgroundColor: '#ff3b3b11'
+  },
+  deleteAtletaBtnText: { fontSize: 16 },
   iconActionBtn: {
     borderLeftWidth: 1, borderLeftColor: '#2e2e3a',
     paddingHorizontal: 12, paddingVertical: 16, justifyContent: 'center'
@@ -993,7 +1506,23 @@ const styles = StyleSheet.create({
     borderRadius: 10, padding: 14, color: '#f0f0f0', fontSize: 15
   },
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  addLabel: { fontSize: 12, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
+  addLabel: {
+    fontSize: 12, color: '#9CA3AF', fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4
+  },
+  ptValoriBox: {
+    backgroundColor: '#1a2a3a', borderWidth: 1, borderColor: '#2a4a6a',
+    borderRadius: 12, padding: 14, gap: 10
+  },
+  ptValoriTitle: { fontSize: 12, fontWeight: '800', color: '#7eb8ff', marginBottom: 2 },
+  ptValoriHint: { fontSize: 11, color: '#6B7280', lineHeight: 16 },
+  ptValoriGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  ptValoreItem: { width: '47%' },
+  ptValoreLabel: { fontSize: 11, color: '#7eb8ff', fontWeight: '600', marginBottom: 4 },
+  ptValoreInput: {
+    backgroundColor: '#26262e', borderWidth: 1, borderColor: '#2a4a6a',
+    borderRadius: 8, padding: 10, color: '#7eb8ff', fontSize: 13
+  },
   selezioneGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   selezioneChip: {
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
@@ -1023,22 +1552,33 @@ const styles = StyleSheet.create({
     backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#2e2e3a',
     borderRadius: 16, padding: 24, width: '100%'
   },
-  modalTitle: { fontSize: 20, fontWeight: '900', color: '#ff6b6b', marginBottom: 12 },
+  modalTitle: { fontSize: 18, fontWeight: '900', color: '#ff6b6b', marginBottom: 12 },
   modalText: { fontSize: 14, color: '#9CA3AF', lineHeight: 22, marginBottom: 16 },
   nomeInput: {
     backgroundColor: '#26262e', borderWidth: 1, borderColor: '#2e2e3a',
     borderRadius: 10, padding: 14, color: '#f0f0f0', fontSize: 15, marginBottom: 16
   },
   modalBtns: { flexDirection: 'row', gap: 12 },
+  modalBtns3: { flexDirection: 'row', gap: 8 },
   modalCancel: {
-    flex: 1, backgroundColor: '#26262e', borderRadius: 10, padding: 14, alignItems: 'center'
+    flex: 1, backgroundColor: '#26262e', borderRadius: 10, padding: 12, alignItems: 'center'
   },
-  modalCancelText: { color: '#9CA3AF', fontWeight: '700', fontSize: 15 },
+  modalCancelText: { color: '#9CA3AF', fontWeight: '700', fontSize: 13 },
   modalConfirm: {
     flex: 1, backgroundColor: '#ff3b3b22', borderWidth: 1,
-    borderColor: '#ff3b3b44', borderRadius: 10, padding: 14, alignItems: 'center'
+    borderColor: '#ff3b3b44', borderRadius: 10, padding: 12, alignItems: 'center'
   },
-  modalConfirmText: { color: '#ff6b6b', fontWeight: '800', fontSize: 15 },
+  modalConfirmText: { color: '#ff6b6b', fontWeight: '800', fontSize: 13 },
+  modalSkipBtn: {
+    flex: 1, backgroundColor: '#f59e0b22', borderWidth: 1,
+    borderColor: '#f59e0b44', borderRadius: 10, padding: 12, alignItems: 'center'
+  },
+  modalSkipBtnText: { color: '#f59e0b', fontWeight: '700', fontSize: 12 },
+  modalOverwriteBtn: {
+    flex: 1, backgroundColor: '#e8ff4722', borderWidth: 1,
+    borderColor: '#e8ff4744', borderRadius: 10, padding: 12, alignItems: 'center'
+  },
+  modalOverwriteBtnText: { color: '#e8ff47', fontWeight: '700', fontSize: 12 },
   modalArchiviaBtn: {
     flex: 1, backgroundColor: '#f59e0b22', borderWidth: 1,
     borderColor: '#f59e0b44', borderRadius: 10, padding: 14, alignItems: 'center'
@@ -1108,4 +1648,40 @@ const cardStyles = StyleSheet.create({
     borderWidth: 1, borderColor: '#2e2e3a', borderStyle: 'dashed', alignItems: 'center'
   },
   addSerieBtnText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
+  timerBtn: {
+    backgroundColor: '#52e89e', borderRadius: 6,
+    paddingVertical: 5, paddingHorizontal: 6,
+    alignItems: 'center', justifyContent: 'center', marginTop: 2
+  },
+  timerBtnText: { color: '#000', fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
+  copiaBtn: {
+    marginTop: 10, padding: 10, borderRadius: 8,
+    borderWidth: 1, borderColor: '#7eb8ff44', backgroundColor: '#7eb8ff11', alignItems: 'center'
+  },
+  copiaBtnText: { color: '#7eb8ff', fontSize: 12, fontWeight: '700' },
+  copiaForm: {
+    marginTop: 8, backgroundColor: '#1a2a3a', borderWidth: 1,
+    borderColor: '#2a4a6a', borderRadius: 12, padding: 14, gap: 10
+  },
+  copiaFormTitle: { fontSize: 13, fontWeight: '800', color: '#7eb8ff', marginBottom: 4 },
+  copiaFormLabel: {
+    fontSize: 11, color: '#7eb8ff', fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4
+  },
+  selezioneGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  selezioneChip: {
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8,
+    backgroundColor: '#26262e', borderWidth: 1, borderColor: '#2e2e3a'
+  },
+  selezioneChipActive: { backgroundColor: '#7eb8ff22', borderColor: '#7eb8ff' },
+  selezioneChipText: { fontSize: 11, fontWeight: '700', color: '#6B7280' },
+  selezioneChipTextActive: { color: '#7eb8ff' },
+  selezioneActions: { flexDirection: 'row', gap: 16, marginTop: 2 },
+  selezioneTutte: { fontSize: 11, color: '#52e89e', fontWeight: '600' },
+  selezioneNessuna: { fontSize: 11, color: '#ff6b6b', fontWeight: '600' },
+  copiaConfirmBtn: {
+    backgroundColor: '#7eb8ff', borderRadius: 10,
+    padding: 12, alignItems: 'center', marginTop: 4
+  },
+  copiaConfirmBtnText: { color: '#000', fontWeight: '800', fontSize: 13 },
 })

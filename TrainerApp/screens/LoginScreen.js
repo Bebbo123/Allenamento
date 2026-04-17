@@ -1,44 +1,41 @@
 import { useState } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, KeyboardAvoidingView, Platform
+  StyleSheet, KeyboardAvoidingView, Platform, Alert
 } from 'react-native'
 import { supabase } from '../lib/supabase'
 
 export default function LoginScreen({ navigation }) {
-  const [email, setEmail] = useState('')
+  const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [errore, setErrore] = useState('')
 
   async function handleLogin() {
-    if (!email || !password) {
-      setErrore('Inserisci email e password')
-      return
-    }
+    if (!login || !password) { Alert.alert('Inserisci credenziali'); return }
     setLoading(true)
-    setErrore('')
 
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    let email = login.trim()
 
-      if (error) {
-        setErrore('Errore: ' + error.message)
+    // Se non contiene @ potrebbe essere uno username
+    if (!email.includes('@')) {
+      // Cerca il profilo con questo username
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('email')
+        .eq('username', email.toLowerCase())
+        .single()
+
+      if (!profile) {
+        Alert.alert('Errore', 'Username non trovato')
         setLoading(false)
         return
       }
-
-      if (!data?.session) {
-        setErrore('Sessione non creata — riprova')
-        setLoading(false)
-        return
-      }
-
-      // Login OK — App.js gestirà il redirect automaticamente
-    } catch (e) {
-      setErrore('Errore di rete: ' + e.message)
-      setLoading(false)
+      email = profile.email
     }
+
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) Alert.alert('Errore', 'Credenziali non valide')
+    setLoading(false)
   }
 
   return (
@@ -51,14 +48,13 @@ export default function LoginScreen({ navigation }) {
         <Text style={styles.subtitle}>Il tuo allenamento, ovunque</Text>
 
         <View style={styles.form}>
-          <Text style={styles.label}>Email</Text>
+          <Text style={styles.label}>Email o Username</Text>
           <TextInput
             style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="email@esempio.com"
+            value={login}
+            onChangeText={setLogin}
+            placeholder="email@esempio.com oppure username"
             placeholderTextColor="#6B7280"
-            keyboardType="email-address"
             autoCapitalize="none"
           />
 
@@ -71,12 +67,6 @@ export default function LoginScreen({ navigation }) {
             placeholderTextColor="#6B7280"
             secureTextEntry
           />
-
-          {errore !== '' && (
-            <View style={styles.erroreBox}>
-              <Text style={styles.erroreText}>{errore}</Text>
-            </View>
-          )}
 
           <TouchableOpacity
             style={[styles.btn, loading && styles.btnDisabled]}
@@ -109,20 +99,13 @@ const styles = StyleSheet.create({
     fontSize: 52, fontWeight: '900', color: '#e8ff47',
     letterSpacing: 4, textAlign: 'center', marginBottom: 6
   },
-  subtitle: {
-    fontSize: 15, color: '#9CA3AF', textAlign: 'center', marginBottom: 48
-  },
+  subtitle: { fontSize: 15, color: '#9CA3AF', textAlign: 'center', marginBottom: 48 },
   form: { gap: 12 },
   label: { fontSize: 13, fontWeight: '600', color: '#D1D5DB' },
   input: {
     backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#2e2e3a',
     borderRadius: 12, padding: 14, color: '#f0f0f0', fontSize: 15
   },
-  erroreBox: {
-    backgroundColor: '#ff3b3b22', borderWidth: 1, borderColor: '#ff3b3b44',
-    borderRadius: 10, padding: 12
-  },
-  erroreText: { color: '#ff6b6b', fontSize: 13, fontWeight: '600', textAlign: 'center' },
   btn: {
     backgroundColor: '#e8ff47', borderRadius: 12,
     padding: 16, alignItems: 'center', marginTop: 8
