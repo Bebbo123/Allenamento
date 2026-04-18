@@ -7,6 +7,21 @@ import { supabase } from '../lib/supabase'
 import ProgressiScreen from './ProgressiScreen'
 import StoricoSchede from './StoricoSchede'
 import VistaTabella from './VistaTabella'
+// Client temporaneo per creare atleti senza toccare la sessione PT
+import { createClient } from '@supabase/supabase-js'
+
+const tempSupabase = createClient(
+  'https://lyxpeecrxhlleahvxzjw.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5eHBlZWNyeGhsbGVhaHZ4emp3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwODU5ODAsImV4cCI6MjA5MTY2MTk4MH0.DrqPs0RUMxVvIj8ds2vq5kbI6oLs232wWVqD9DHi4a8',
+  {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      storageKey: 'trainer-app-temp-signup'
+    }
+  }
+)
 
 export default function HomePTScreen() {
   const [profile, setProfile] = useState(null)
@@ -76,79 +91,94 @@ export default function HomePTScreen() {
     setDeletingAtleta(false)
   }
 
-  async function creaAtleta() {
-    if (!nuovoNome.trim() || !nuovoUsername.trim() || !nuovaPassword.trim()) {
-      setCreaMsg({ tipo: 'errore', testo: 'Compila tutti i campi' })
-      return
-    }
-    if (nuovaPassword.length < 6) {
-      setCreaMsg({ tipo: 'errore', testo: 'Password minimo 6 caratteri' })
-      return
-    }
-
-    setCreaLoading(true)
-    setCreaMsg(null)
-
-    const username = nuovoUsername.trim().toLowerCase()
-
-    const { data: existingList } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('username', username)
-
-    if (existingList && existingList.length > 0) {
-      setCreaMsg({ tipo: 'errore', testo: 'Username già in uso, scegline un altro' })
-      setCreaLoading(false)
-      return
-    }
-
-    const fakeEmail = `${username}@trainer-test.it`
-
-    const { data, error } = await supabase.auth.signUp({
-      email: fakeEmail,
-      password: nuovaPassword,
-      options: {
-        data: {
-          nome: nuovoNome.trim(),
-          ruolo: 'atleta',
-          username: username,
-          tipo_account: 'username',
-          pt_creatore: profile.id
-        }
-      }
-    })
-
-    if (error) {
-      setCreaMsg({ tipo: 'errore', testo: 'Errore: ' + error.message })
-      setCreaLoading(false)
-      return
-    }
-
-    if (!data.user) {
-      setCreaMsg({ tipo: 'errore', testo: 'Errore nella creazione account' })
-      setCreaLoading(false)
-      return
-    }
-
-    await supabase.from('pt_atleta').insert({
-      pt_id: profile.id,
-      atleta_id: data.user.id,
-      stato: 'attivo'
-    })
-
-    await supabase.from('schede').insert({
-      atleta_id: data.user.id,
-      nome: 'Scheda 1',
-      stato: 'attiva'
-    })
-
-    setCreaMsg({ tipo: 'ok', testo: `✓ Atleta "${nuovoNome.trim()}" creato! Username: @${username}` })
-    setNuovoNome('')
-    setNuovoUsername('')
-    setNuovaPassword('')
-    setCreaLoading(false)
-    fetchAtleti()
+async function creaAtleta() {
+  if (!nuovoNome.trim() || !nuovoUsername.trim() || !nuovaPassword.trim()) {
+    setCreaMsg({ tipo: 'errore', testo: 'Compila tutti i campi' })
+    return
   }
+  if (nuovaPassword.length < 6) {
+    setCreaMsg({ tipo: 'errore', testo: 'Password minimo 6 caratteri' })
+    return
+  }
+
+  setCreaLoading(true)
+  setCreaMsg(null)
+
+  const username = nuovoUsername.trim().toLowerCase()
+
+  const { data: existingList } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('username', username)
+
+  if (existingList && existingList.length > 0) {
+    setCreaMsg({ tipo: 'errore', testo: 'Username già in uso, scegline un altro' })
+    setCreaLoading(false)
+    return
+  }
+
+  const fakeEmail = `${username}@trainer-test.it`
+
+  // Salva sessione PT
+  const { data: { session: sessionePT } } = await supabase.auth.getSession()
+  const ptAccessToken = sessionePT.access_token
+  const ptRefreshToken = sessionePT.refresh_token
+  const ptId = profile.id
+
+  // SignUp atleta — questo sovrascrive la sessione
+  const { data, error } = await supabase.auth.signUp({
+    email: fakeEmail,
+    password: nuovaPassword,
+    options: {
+      data: {
+        nome: nuovoNome.trim(),
+        ruolo: 'atleta',
+        username,
+        tipo_account: 'username',
+        pt_creatore: ptId
+      }
+    }
+  })
+
+  if (error || !data.user) {
+    // Ripristina sessione PT
+    await supabase.auth.setSession({
+      access_token: ptAccessToken,
+      refresh_token: ptRefreshToken
+    })
+    setCreaMsg({ tipo: 'errore', testo: error ? error.message : 'Errore creazione' })
+    setCreaLoading(false)
+    return
+  }
+
+  const atletaId = data.user.id
+
+  // Ripristina SUBITO sessione PT prima di qualsiasi altra operazione
+  await supabase.auth.setSession({
+    access_token: ptAccessToken,
+    refresh_token: ptRefreshToken
+  })
+
+  // Aspetta che sessione PT sia attiva e trigger abbia creato profilo
+  await new Promise(resolve => setTimeout(resolve, 2000))
+
+  // Aggiorna profilo atleta con dati PT tramite funzione SQL
+  await supabase.rpc('setup_athlete_data', {
+    p_atleta_id: atletaId,
+    p_username: username,
+    p_nome: nuovoNome.trim(),
+    p_email: fakeEmail,
+    p_pt_id: ptId
+  })
+
+  setCreaMsg({ tipo: 'ok', testo: `✓ Atleta "${nuovoNome.trim()}" creato! Username: @${username}` })
+  setNuovoNome('')
+  setNuovoUsername('')
+  setNuovaPassword('')
+  setCreaLoading(false)
+
+  setTimeout(() => fetchAtleti(), 500)
+}
 
   async function handleLogout() {
     await supabase.auth.signOut()
@@ -329,7 +359,17 @@ export default function HomePTScreen() {
 
         {/* ATLETI COLLEGATI */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>👥 I tuoi Atleti ({atleti.length})</Text>
+          <View style={styles.sectionHeader}>
+  <View style={styles.sectionHeader}>
+  <Text style={styles.sectionTitle}>👥 I tuoi Atleti ({atleti.length})</Text>
+  <TouchableOpacity style={styles.refreshBtn} onPress={fetchAtleti}>
+    <Text style={styles.refreshBtnText}>↻ Aggiorna</Text>
+  </TouchableOpacity>
+</View>
+  <TouchableOpacity style={styles.refreshBtn} onPress={fetchAtleti}>
+    <Text style={styles.refreshBtnText}>↻ Aggiorna</Text>
+  </TouchableOpacity>
+</View>
           {atleti.length === 0 ? (
             <View style={styles.empty}>
               <Text style={styles.emptyIcon}>👤</Text>
@@ -1376,7 +1416,12 @@ const styles = StyleSheet.create({
   msgTextErrore: { color: '#ff6b6b' },
   creaBtn: { backgroundColor: '#e8ff47', borderRadius: 12, padding: 14, alignItems: 'center' },
   creaBtnDisabled: { opacity: 0.6 },
-  creaBtnText: { color: '#000', fontWeight: '800', fontSize: 15 },
+  creaBtnText: { color: '#000', fontWeight: '800', fontSize: 15 }, 
+  refreshBtn: {
+    backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#2e2e3a',
+    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6
+  },
+  refreshBtnText: { color: '#9CA3AF', fontWeight: '700', fontSize: 13 },
   richiestaCard: {
     backgroundColor: '#1e1e24', borderWidth: 1, borderColor: '#2e2e3a',
     borderRadius: 12, padding: 14, flexDirection: 'row', alignItems: 'center', marginBottom: 10
@@ -1684,4 +1729,4 @@ const cardStyles = StyleSheet.create({
     padding: 12, alignItems: 'center', marginTop: 4
   },
   copiaConfirmBtnText: { color: '#000', fontWeight: '800', fontSize: 13 },
-})
+}) 
