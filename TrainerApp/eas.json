@@ -9,7 +9,10 @@
       "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "store",
+      "ios": {
+        "image": "macos-sonoma-14.6-xcode-16.1"
+      }
     },
     "production": {
       "autoIncrement": true
